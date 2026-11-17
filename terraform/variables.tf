@@ -6,7 +6,7 @@ variable "aws_region" {
 
 variable "project" {
   type        = string
-  description = "Prefixo/tag dos recursos (deve bater com o usado no bootstrap)"
+  description = "Prefixo/tag dos recursos (deve bater com o escopo da role de deploy)"
   default     = "boca-de-lobo"
 }
 

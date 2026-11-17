@@ -52,11 +52,8 @@ jobs:
           terraform_version: 1.10.5
       - name: terraform fmt
         run: terraform fmt -check -recursive terraform
-      - name: terraform validate (stack)
+      - name: terraform validate
         working-directory: terraform
-        run: terraform init -backend=false -input=false && terraform validate
-      - name: terraform validate (bootstrap)
-        working-directory: terraform/bootstrap
         run: terraform init -backend=false -input=false && terraform validate
       - name: Trivy misconfig scan
         run: |

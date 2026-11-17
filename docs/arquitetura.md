@@ -49,6 +49,8 @@ flowchart LR
 
 **Fluxo:** cada push executa os scans. Na `main`, se todos passarem, o job `infra` assume a IAM Role via OIDC (sem chave de longa duração), aplica o Terraform (state no S3) e o job `deploy` publica a imagem no ECR e manda o EC2 executar `docker compose pull && up -d` via SSM Run Command. Nenhuma porta administrativa é aberta.
 
+> O OIDC provider, a IAM Role de deploy e o bucket do state são mantidos em um repositório de infraestrutura base separado (requisitos em [aws-role.md](aws-role.md)). Este repositório cria apenas os recursos da aplicação: EC2, EIP, Security Group, ECR e a role/instance profile do EC2.
+
 ## 2. Controles de segurança
 
 | Requisito | Implementação |

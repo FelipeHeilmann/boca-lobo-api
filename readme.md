@@ -21,13 +21,13 @@ O **Boca de Lobo** é um MVP de engenharia de software focado em segurança e em
 
 Documentação complementar:
 - [Arquitetura, responsabilidade compartilhada, LGPD e custo](docs/arquitetura.md)
+- [Pré-requisitos AWS: role de deploy, OIDC e bucket do state](docs/aws-role.md)
 - [Evidências (pipeline barrada/corrigida, dashboard, alerta)](docs/evidencias.md)
 
 ### Estrutura
 ```
 app/                     API FastAPI + Dockerfile
 docker-compose.yml       Stack executada no EC2 (imagem do ECR)
-terraform/bootstrap/     Executado 1x: bucket do state, OIDC do GitHub, IAM Role de deploy
 terraform/               Stack principal (aplicada pela pipeline)
 .github/workflows/       Pipeline CI/CD
 monitoring/              Prometheus, Alertmanager, Grafana (local)
@@ -40,9 +40,9 @@ docs/                    Arquitetura e evidências
 ## 🚀 Passo a passo reproduzível
 
 ### 0. Pré-requisitos
-- Conta AWS com permissão de administrador para o bootstrap (IAM, S3, OIDC). *AWS Academy/Learner Lab não permite criar OIDC/roles.*
+- Conta AWS com o OIDC provider do GitHub, a IAM Role de deploy e o bucket do Terraform state já criados (gerenciados em repositório separado — ver [docs/aws-role.md](docs/aws-role.md))
 - [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) autenticado (`aws sts get-caller-identity`)
-- [Terraform ≥ 1.10](https://developer.hashicorp.com/terraform/install)
+- [Terraform ≥ 1.10](https://developer.hashicorp.com/terraform/install) (apenas para `terraform output`/`destroy` locais)
 - Docker + Docker Compose v2
 - Fork/clone deste repositório no GitHub
 
@@ -56,36 +56,21 @@ curl http://localhost:8000/metrics
 docker compose down
 ```
 
-### 2. Bootstrap da AWS (uma única vez, local)
-Cria o bucket do Terraform state, o OIDC provider do GitHub e a IAM Role `boca-lobo-github-deploy`.
+### 2. Conferir a role de deploy na AWS
+A IAM Role, o OIDC provider e o bucket do state são mantidos em um **repositório separado**; este projeto apenas assume a role via OIDC. Confira em [docs/aws-role.md](docs/aws-role.md) se:
 
-> Se você usa um fork, ajuste `github_repository` (formato `owner/repo`) em `terraform/bootstrap/variables.tf` ou passe `-var github_repository=owner/repo`.
+- a trust policy aceita `repo:CarlosECRibeiro/boca_de_lobo_fiap:environment:production`;
+- a role tem as permissões de S3 (prefixo `boca-de-lobo/*`), EC2, ECR, IAM (`boca-lobo-*`) e SSM listadas lá.
 
-```bash
-cd terraform/bootstrap
-terraform init
-terraform apply            # confira o plano e confirme
-terraform output           # anote state_bucket_name e github_deploy_role_arn
-```
-
-Migre o state do bootstrap para o bucket (assim nenhum state fica local):
-```bash
-# descomente o bloco backend "s3" em terraform/bootstrap/main.tf e rode:
-terraform init -migrate-state -backend-config="bucket=$(terraform output -raw state_bucket_name)"
-rm -f terraform.tfstate terraform.tfstate.backup
-cd ../..
-```
-
-> Se a conta já tiver o OIDC provider do GitHub (`token.actions.githubusercontent.com`), importe-o antes do apply:
-> `terraform import aws_iam_openid_connect_provider.github arn:aws:iam::<CONTA>:oidc-provider/token.actions.githubusercontent.com`
+Anote o **ARN da role** e o **nome do bucket** para o próximo passo.
 
 ### 3. Configurar o GitHub
 Em **Settings → Environments → New environment** crie `production` (em *Deployment branches* restrinja a `main`). Dentro dele cadastre:
 
 | Nome | Tipo | Valor |
 |---|---|---|
-| `AWS_ROLE_ARN` | Secret | output `github_deploy_role_arn` |
-| `TF_STATE_BUCKET` | Secret | output `state_bucket_name` |
+| `AWS_ROLE_ARN` | Secret | ARN da role de deploy criada no repositório de infra base |
+| `TF_STATE_BUCKET` | Secret | nome do bucket do Terraform state |
 | `TF_VAR_admin_cidrs` | Secret *(opcional)* | `["SEU.IP.PUBLICO/32"]` para liberar SSH; omita para usar apenas SSM |
 | `AWS_REGION` | Variable | `us-east-1` |
 | `TF_VAR_project` | Variable *(opcional)* | `boca-de-lobo` |
@@ -141,8 +126,8 @@ O script para o container via SSM. Após ~1 min o `ApiDown` fica **FIRING** no P
 cd terraform
 terraform init -backend-config="bucket=<state_bucket_name>"
 terraform destroy
-cd bootstrap && terraform destroy   # esvazie o bucket (versões) antes, se necessário
 ```
+A role, o OIDC provider e o bucket do state pertencem ao repositório separado e não são removidos aqui.
 
 ---
 
