@@ -117,6 +117,26 @@ resource "aws_ecr_lifecycle_policy" "app" {
   })
 }
 
+# Imagem do proxy HTTPS (Caddy endurecido, proxy/Dockerfile)
+resource "aws_ecr_repository" "proxy" {
+  name                 = "boca-lobo-ecr-proxy"
+  image_tag_mutability = "IMMUTABLE"
+  force_delete         = true
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "AES256" # trivy:ignore:AVD-AWS-0033
+  }
+}
+
+resource "aws_ecr_lifecycle_policy" "proxy" {
+  repository = aws_ecr_repository.proxy.name
+  policy     = aws_ecr_lifecycle_policy.app.policy
+}
+
 # -------------------------- IAM da instância --------------------------------
 data "aws_iam_policy_document" "ec2_trust" {
   statement {

@@ -1,10 +1,10 @@
-# Stack de produção executada no EC2 (imagens do ECR/Docker Hub, sem build e sem segredos).
+# Stack de produção executada no EC2 (imagens do ECR, sem build e sem segredos).
 # Variáveis gravadas em /opt/boca-de-lobo/.env pelo job de deploy (via SSM):
-#   IMAGE_URI, SITE_HOST, DYNAMODB_TABLE, AWS_REGION, CORS_ORIGINS
+#   IMAGE_URI, PROXY_IMAGE_URI, SITE_HOST, DYNAMODB_TABLE, AWS_REGION, CORS_ORIGINS
 # A API lê o DynamoDB com a IAM Role da instância (IMDSv2), sem nenhuma chave.
 services:
   proxy:
-    image: caddy:2.10.0-alpine
+    image: ${PROXY_IMAGE_URI:?defina PROXY_IMAGE_URI}   # proxy/Dockerfile (Caddyfile embutido)
     container_name: boca-de-lobo-proxy
     restart: unless-stopped
     environment:
@@ -13,7 +13,6 @@ services:
       - "80:8080"    # ACME (Let's Encrypt) + redirect para HTTPS
       - "443:8443"   # HTTPS público
     volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./caddy/data:/data        # certificados (persistem entre deploys)
       - ./caddy/config:/config
     user: "10002:10002"

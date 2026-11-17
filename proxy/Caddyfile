@@ -1,6 +1,7 @@
 # Proxy reverso com HTTPS automático (Let's Encrypt).
 # SITE_HOST = <ip-com-hifens>.sslip.io, gravado no .env pelo deploy (sslip.io resolve para o IP).
-# Caddy roda como usuário não-root, então escuta em portas altas; o Docker publica 80->8080 e 443->8443.
+# Caddy roda como usuário não-root (uid 10002) e sem capabilities, então escuta em portas altas;
+# o Docker publica 80->8080 e 443->8443. Este arquivo é embutido na imagem (proxy/Dockerfile).
 {
 	http_port 8080
 	https_port 8443

@@ -13,6 +13,11 @@ output "ecr_repository_url" {
   value       = aws_ecr_repository.app.repository_url
 }
 
+output "proxy_ecr_repository_url" {
+  description = "URL do repositório ECR da imagem do proxy (Caddy)"
+  value       = aws_ecr_repository.proxy.repository_url
+}
+
 output "site_host" {
   description = "Hostname público com HTTPS (sslip.io resolve para o Elastic IP)"
   value       = local.site_host

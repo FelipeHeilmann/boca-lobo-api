@@ -11,6 +11,7 @@ permissions:
 env:
   TRIVY_IMAGE: aquasec/trivy:0.58.1
   IMAGE_NAME: boca-de-lobo
+  PROXY_IMAGE_NAME: boca-lobo-proxy
 
 jobs:
   # ---------------------------------------------------------------- SECRETS
@@ -76,28 +77,33 @@ jobs:
 
   # ---------------------------------------------------- BUILD + IMAGE SCAN
   build-scan:
-    name: Docker build + Trivy image
+    name: Docker build + Trivy image (API e proxy)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Build
-        run: docker build -t "$IMAGE_NAME:$GITHUB_SHA" app
+        run: |
+          docker build -t "$IMAGE_NAME:$GITHUB_SHA" app
+          docker build -t "$PROXY_IMAGE_NAME:$GITHUB_SHA" proxy
       - name: Verifica usuário não-root
         run: |
-          uid=$(docker run --rm --entrypoint id "$IMAGE_NAME:$GITHUB_SHA" -u)
-          echo "uid=$uid"; test "$uid" != "0"
+          for img in "$IMAGE_NAME:$GITHUB_SHA" "$PROXY_IMAGE_NAME:$GITHUB_SHA"; do
+            uid=$(docker run --rm --entrypoint id "$img" -u)
+            echo "$img uid=$uid"; test "$uid" != "0"
+          done
+      - name: Verifica que o proxy executa com o hardening do compose
+        run: |
+          docker run --rm --user 10002:10002 --cap-drop ALL --security-opt no-new-privileges:true \
+            --read-only "$PROXY_IMAGE_NAME:$GITHUB_SHA" caddy version
       - name: Trivy image scan (HIGH/CRITICAL bloqueiam)
         run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY_IMAGE" image \
-            --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
-            "$IMAGE_NAME:$GITHUB_SHA"
-      - name: Trivy na imagem do proxy (Caddy, terceiro) — informativo
-        run: |
-          docker run --rm "$TRIVY_IMAGE" image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 \
-            "$(grep -oE 'caddy:[^ ]+' docker-compose.yml)"
-      - name: Exporta imagem
+          for img in "$IMAGE_NAME:$GITHUB_SHA" "$PROXY_IMAGE_NAME:$GITHUB_SHA"; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY_IMAGE" image \
+              --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$img"
+          done
+      - name: Exporta imagens
         if: github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request'
-        run: docker save "$IMAGE_NAME:$GITHUB_SHA" | gzip > image.tar.gz
+        run: docker save "$IMAGE_NAME:$GITHUB_SHA" "$PROXY_IMAGE_NAME:$GITHUB_SHA" | gzip > image.tar.gz
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request'
         with:
@@ -128,6 +134,7 @@ jobs:
       instance_id: ${{ steps.out.outputs.instance_id }}
       public_ip: ${{ steps.out.outputs.public_ip }}
       ecr_repository_url: ${{ steps.out.outputs.ecr_repository_url }}
+      proxy_ecr_repository_url: ${{ steps.out.outputs.proxy_ecr_repository_url }}
       site_host: ${{ steps.out.outputs.site_host }}
       dynamodb_table: ${{ steps.out.outputs.dynamodb_table }}
     defaults:
@@ -156,6 +163,7 @@ jobs:
             echo "instance_id=$(terraform output -raw instance_id)"
             echo "public_ip=$(terraform output -raw public_ip)"
             echo "ecr_repository_url=$(terraform output -raw ecr_repository_url)"
+            echo "proxy_ecr_repository_url=$(terraform output -raw proxy_ecr_repository_url)"
             echo "site_host=$(terraform output -raw site_host)"
             echo "dynamodb_table=$(terraform output -raw dynamodb_table)"
           } >> "$GITHUB_OUTPUT"
@@ -177,6 +185,7 @@ jobs:
       INSTANCE_ID: ${{ needs.infra.outputs.instance_id }}
       PUBLIC_IP: ${{ needs.infra.outputs.public_ip }}
       ECR_URL: ${{ needs.infra.outputs.ecr_repository_url }}
+      PROXY_ECR_URL: ${{ needs.infra.outputs.proxy_ecr_repository_url }}
       SITE_HOST: ${{ needs.infra.outputs.site_host }}
       DYNAMODB_TABLE: ${{ needs.infra.outputs.dynamodb_table }}
       CORS_ORIGINS: ${{ vars.CORS_ORIGINS || 'https://felipevoidela.github.io' }}
@@ -190,11 +199,13 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
-      - name: Push da imagem para o ECR
+      - name: Push das imagens para o ECR
         run: |
           gunzip -c image.tar.gz | docker load
           docker tag "$IMAGE_NAME:$GITHUB_SHA" "$ECR_URL:$GITHUB_SHA"
+          docker tag "$PROXY_IMAGE_NAME:$GITHUB_SHA" "$PROXY_ECR_URL:$GITHUB_SHA"
           docker push "$ECR_URL:$GITHUB_SHA"
+          docker push "$PROXY_ECR_URL:$GITHUB_SHA"
 
       - name: Aguarda instância registrada no SSM
         run: |
@@ -211,9 +222,9 @@ jobs:
       - name: Deploy (docker compose) via SSM Run Command
         run: |
           REGISTRY="${ECR_URL%%/*}"
-          BUNDLE_B64=$(tar czf - docker-compose.yml caddy/Caddyfile | base64 -w0)
-          ENV_B64=$(printf 'IMAGE_URI=%s\nSITE_HOST=%s\nDYNAMODB_TABLE=%s\nAWS_REGION=%s\nCORS_ORIGINS=%s\n' \
-            "$ECR_URL:$GITHUB_SHA" "$SITE_HOST" "$DYNAMODB_TABLE" "$AWS_REGION" "$CORS_ORIGINS" | base64 -w0)
+          BUNDLE_B64=$(tar czf - docker-compose.yml | base64 -w0)
+          ENV_B64=$(printf 'IMAGE_URI=%s\nPROXY_IMAGE_URI=%s\nSITE_HOST=%s\nDYNAMODB_TABLE=%s\nAWS_REGION=%s\nCORS_ORIGINS=%s\n' \
+            "$ECR_URL:$GITHUB_SHA" "$PROXY_ECR_URL:$GITHUB_SHA" "$SITE_HOST" "$DYNAMODB_TABLE" "$AWS_REGION" "$CORS_ORIGINS" | base64 -w0)
           jq -n \
             --arg bundle "$BUNDLE_B64" \
             --arg env "$ENV_B64" \
