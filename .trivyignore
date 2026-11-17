@@ -1,9 +1,12 @@
 # Achados aceitos conscientemente (revisar a cada mudança de arquitetura).
 # Também marcados inline em terraform/main.tf com "# trivy:ignore:<ID>".
 
-# SG com ingress 0.0.0.0/0 na porta 80: é a API pública do MVP (não é porta admin).
+# SG com ingress 0.0.0.0/0 nas portas 80 e 443: API pública (HTTPS) e desafio ACME. Não são portas admin.
 AVD-AWS-0107
-# Egress 0.0.0.0/0: necessário para Open-Meteo, ECR, SSM e atualizações do SO.
+# Egress 0.0.0.0/0: necessário para DynamoDB, ECR, SSM, Let's Encrypt e atualizações do SO.
 AVD-AWS-0104
 # ECR com criptografia AES256 gerenciada pela AWS (KMS CMK geraria custo extra no MVP).
 AVD-AWS-0033
+# S3 de ingestão com SSE-S3 (AES256) em vez de KMS CMK: uma CMK custa US$ 1/mês e tiraria o projeto do Always Free.
+# O bucket só recebe a view Ouro, que já é anonimizada (sem dados pessoais).
+AVD-AWS-0132

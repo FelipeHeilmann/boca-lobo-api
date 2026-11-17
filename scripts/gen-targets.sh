@@ -3,6 +3,7 @@
 # Uso:
 #   scripts/gen-targets.sh              # lê o IP do output do Terraform (requer terraform init com o backend)
 #   scripts/gen-targets.sh 3.85.10.20   # informa o IP manualmente
+# O alvo é o hostname HTTPS <ip-com-hifens>.sslip.io:443 servido pelo Caddy.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -12,14 +13,16 @@ if [ -z "$IP" ]; then
   IP="$(terraform -chdir="$ROOT/terraform" output -raw public_ip)"
 fi
 
+HOST="${IP//./-}.sslip.io"
+
 mkdir -p "$ROOT/monitoring/targets"
 cat > "$ROOT/monitoring/targets/api.json" <<EOF
 [
   {
-    "targets": ["${IP}:80"],
+    "targets": ["${HOST}:443"],
     "labels": { "env": "production", "service": "boca-de-lobo-api" }
   }
 ]
 EOF
 
-echo "Alvo do Prometheus: http://${IP}/metrics"
+echo "Alvo do Prometheus: https://${HOST}/metrics"

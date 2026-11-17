@@ -1,19 +1,32 @@
+"""
+API do MVP Boca de Lobo.
+
+Serve ao frontend (mapa do cidadão) o retrato mais recente da camada Ouro, publicado no DynamoDB pela
+Lambda "ingestor". A leitura usa cache em memória (padrão 60 s) atualizado em segundo plano: o DynamoDB é
+consultado ~1x por minuto independentemente do tráfego, e se ele falhar a API continua servindo a última
+versão válida.
+"""
 import asyncio
+import gzip
+import json
 import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
-import requests
-from fastapi import FastAPI, Request, Response
+import boto3
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
-# Configuração de logging estruturado
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("citizen-tech-api")
 
-RAIN_API_URL = os.getenv("RAIN_API_URL", "https://api.open-meteo.com/v1/forecast")
-RAIN_PROBE_INTERVAL = int(os.getenv("RAIN_PROBE_INTERVAL", "60"))
+TABELA = os.getenv("DYNAMODB_TABLE", "boca-lobo-dynamo-mapa")
+REGIAO = os.getenv("AWS_REGION", "us-east-1")
+CACHE_TTL = int(os.getenv("CACHE_TTL_SECONDS", "60"))
+CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 
 # ---------------------------------------------------------------------------
 # Métricas de Ouro (Golden Signals)
@@ -21,10 +34,10 @@ RAIN_PROBE_INTERVAL = int(os.getenv("RAIN_PROBE_INTERVAL", "60"))
 #   Tráfego    -> http_requests_total (counter)
 #   Erros      -> http_requests_total{http_status=~"5.."}
 #   Saturação  -> http_requests_in_progress + process_* (CPU/memória, coletor padrão)
+# Dados do mapa (frescor do pipeline de dados)
+#   mapa_gerado_em_timestamp_seconds, mapa_total_pontos, mapa_leitura_falhas_total
 # ---------------------------------------------------------------------------
-REQUEST_COUNT = Counter(
-    "http_requests_total", "Total HTTP Requests", ["method", "endpoint", "http_status"]
-)
+REQUEST_COUNT = Counter("http_requests_total", "Total HTTP Requests", ["method", "endpoint", "http_status"])
 REQUEST_LATENCY = Histogram(
     "http_request_duration_seconds",
     "HTTP Request Latency in seconds",
@@ -32,54 +45,79 @@ REQUEST_LATENCY = Histogram(
     buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10),
 )
 IN_PROGRESS = Gauge("http_requests_in_progress", "Requisições HTTP em processamento")
-RAIN_API_UP = Gauge("rain_api_up", "Status da API externa de Previsão de Chuva (1=Online, 0=Offline)")
+MAPA_GERADO_EM = Gauge("mapa_gerado_em_timestamp_seconds", "Momento (epoch) em que a camada Ouro gerou o mapa servido")
+MAPA_TOTAL_PONTOS = Gauge("mapa_total_pontos", "Quantidade de bocas de lobo no mapa servido")
+MAPA_FALHAS = Counter("mapa_leitura_falhas_total", "Falhas ao ler o mapa do DynamoDB")
 
-# Pontos críticos de monitoramento (São Paulo - Coordenadas Reais)
-PONTOS_MONITORADOS = [
-    {"id": "BL-042", "bairro": "Itaquera", "lat": -23.5400, "lon": -46.4500},
-    {"id": "BL-109", "bairro": "Grajaú", "lat": -23.7500, "lon": -46.6800},
-    {"id": "BL-215", "bairro": "Vila Prudente", "lat": -23.5800, "lon": -46.5700},
-]
+_dynamo = None
+_cache: dict = {"mapa": None, "lido_em": 0.0}
 
 
-def _consultar_precipitacao(lat: float, lon: float) -> requests.Response:
-    return requests.get(
-        RAIN_API_URL,
-        params={"latitude": lat, "longitude": lon, "current": "precipitation,rain"},
-        timeout=4,
-    )
+def dynamo():
+    global _dynamo
+    if _dynamo is None:
+        _dynamo = boto3.client("dynamodb", region_name=REGIAO)
+    return _dynamo
 
 
-def _probe_rain_api() -> None:
-    """Verifica a disponibilidade da API meteorológica e atualiza o gauge."""
-    ponto = PONTOS_MONITORADOS[0]
+def _epoch(gerado_em: str) -> float:
+    dt = datetime.fromisoformat(gerado_em)
+    if dt.tzinfo is None:  # current_timestamp() do Databricks é UTC
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
+def ler_mapa_dynamo() -> dict | None:
+    resp = dynamo().get_item(TableName=TABELA, Key={"pk": {"S": "mapa_atual"}})
+    item = resp.get("Item")
+    if not item:
+        return None
+    mapa = {
+        "gerado_em": item["gerado_em"]["S"],
+        "fonte": item.get("fonte", {}).get("S"),
+        "limiar_chuva_mm": float(item["limiar_chuva_mm"]["N"]) if "limiar_chuva_mm" in item else None,
+        "pontos": json.loads(gzip.decompress(item["pontos_gz"]["B"])),
+    }
+    MAPA_GERADO_EM.set(_epoch(mapa["gerado_em"]))
+    MAPA_TOTAL_PONTOS.set(len(mapa["pontos"]))
+    return mapa
+
+
+def atualizar_cache() -> None:
     try:
-        ok = _consultar_precipitacao(ponto["lat"], ponto["lon"]).status_code == 200
-    except requests.RequestException as exc:
-        logger.error("Probe da API meteorológica falhou: %s", exc)
-        ok = False
-    RAIN_API_UP.set(1 if ok else 0)
+        mapa = ler_mapa_dynamo()
+        if mapa is not None:
+            _cache["mapa"] = mapa
+        _cache["lido_em"] = time.time()
+    except Exception as exc:  # mantém a última versão válida
+        MAPA_FALHAS.inc()
+        logger.error("Falha ao ler o mapa do DynamoDB (%s): %s", TABELA, exc)
 
 
-async def _probe_loop() -> None:
+async def _loop_cache() -> None:
     while True:
-        await asyncio.to_thread(_probe_rain_api)
-        await asyncio.sleep(RAIN_PROBE_INTERVAL)
+        await asyncio.to_thread(atualizar_cache)
+        await asyncio.sleep(CACHE_TTL)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    task = asyncio.create_task(_probe_loop())
+    task = asyncio.create_task(_loop_cache())
     yield
     task.cancel()
 
 
 app = FastAPI(
-    title="CitizenTech - Drenagem Urbana & Mitigação de Enchentes",
-    version="2.2.0",
-    description="API de monitoramento preventivo de bueiros integrada a dados meteorológicos em tempo real.",
+    title="CitizenTech - Boca de Lobo API",
+    version="3.0.0",
+    description="Serve ao mapa do cidadão o retrato mais recente das bocas de lobo em risco (camada Ouro).",
     lifespan=lifespan,
 )
+
+if CORS_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["GET"], allow_headers=[], max_age=600
+    )
 
 
 @app.middleware("http")
@@ -95,7 +133,7 @@ async def golden_signals_middleware(request: Request, call_next):
         status = response.status_code
         return response
     finally:
-        # Usa o template da rota (ex.: /api/v1/bocas-risco) para evitar alta cardinalidade
+        # Usa o template da rota para evitar alta cardinalidade
         route = request.scope.get("route")
         endpoint = getattr(route, "path", "unmatched")
         REQUEST_LATENCY.labels(request.method, endpoint).observe(time.perf_counter() - start)
@@ -109,68 +147,29 @@ def health_check():
         "status": "healthy",
         "service": "CitizenTech Core API",
         "environment": os.getenv("ENVIRONMENT", "production"),
+        "mapa_carregado": _cache["mapa"] is not None,
     }
 
 
-@app.get("/api/v1/bocas-risco")
-def consultar_risco_bocas():
-    """
-    Consulta em tempo real a precipitação meteorológica via Open-Meteo API
-    para classificar o risco de alagamento nos pontos monitorados.
-    """
-    resultados = []
-    api_funcional = True
+@app.get("/api/v1/mapa")
+def mapa(response: Response):
+    """Retrato atual do mapa do cidadão, no mesmo formato do export da camada Ouro."""
+    if _cache["mapa"] is None:
+        raise HTTPException(status_code=503, detail="Mapa ainda não disponível.")
+    response.headers["Cache-Control"] = f"public, max-age={CACHE_TTL}"
+    return _cache["mapa"]
 
-    for ponto in PONTOS_MONITORADOS:
-        try:
-            response = _consultar_precipitacao(ponto["lat"], ponto["lon"])
 
-            if response.status_code == 200:
-                current_data = response.json().get("current", {})
-                precipitacao = current_data.get("precipitation", 0.0)
-
-                # Motor de decisão baseado em dados reais de chuva (mm)
-                if precipitacao > 4.0:
-                    nivel_risco = "Crítico (Alagamento Iminente)"
-                    status_operacional = "Drenagem Saturada"
-                elif precipitacao > 1.0:
-                    nivel_risco = "Moderado"
-                    status_operacional = "Alerta de Vazão"
-                else:
-                    nivel_risco = "Baixo"
-                    status_operacional = "Operando Normalmente"
-            else:
-                api_funcional = False
-                precipitacao = 0.0
-                nivel_risco = "Indeterminado"
-                status_operacional = "Falha na telemetria"
-        except requests.RequestException as exc:
-            logger.error("Falha de comunicação com o serviço meteorológico para o ponto %s: %s", ponto["id"], exc)
-            api_funcional = False
-            precipitacao = 0.0
-            nivel_risco = "Desconhecido"
-            status_operacional = "Offline por Timeout"
-
-        resultados.append(
-            {
-                "id": ponto["id"],
-                "bairro": ponto["bairro"],
-                "localizacao": {"lat": ponto["lat"], "lon": ponto["lon"]},
-                "precipitacao_atual_mm": precipitacao,
-                "status_operacional": status_operacional,
-                "nivel_risco": nivel_risco,
-            }
-        )
-
-    # Atualiza métrica de observabilidade para o Prometheus / Alerta de Falha Silenciosa
-    RAIN_API_UP.set(1 if api_funcional else 0)
-
-    return {
-        "fonte_dados": "Open-Meteo Real-Time Telemetry",
-        "status_conexao_externa": "conectado" if api_funcional else "degradado",
-        "total_pontos_monitorados": len(resultados),
-        "registros": resultados,
-    }
+@app.get("/api/v1/mapa/resumo")
+def resumo():
+    """Contagem de pontos por nível de alerta (para o bot de alertas e painéis)."""
+    m = _cache["mapa"]
+    if m is None:
+        raise HTTPException(status_code=503, detail="Mapa ainda não disponível.")
+    contagem = {"EVITE A AREA": 0, "ATENCAO": 0, "NORMAL": 0}
+    for p in m["pontos"]:
+        contagem[p.get("nivel_alerta")] = contagem.get(p.get("nivel_alerta"), 0) + 1
+    return {"gerado_em": m["gerado_em"], "total_pontos": len(m["pontos"]), "por_nivel": contagem}
 
 
 @app.get("/metrics")

@@ -10,14 +10,32 @@ groups:
       summary: "MVP Boca de Lobo fora do ar"
       description: "O Prometheus não consegue raspar {{ $labels.instance }} há mais de 1 minuto."
 
-  - alert: PrevisaoChuvaApiDown
-    expr: rain_api_up == 0
-    for: 1m
+  - alert: DadosDesatualizados
+    expr: (time() - mapa_gerado_em_timestamp_seconds{job="boca-de-lobo-api"} > 26 * 3600) and mapa_gerado_em_timestamp_seconds{job="boca-de-lobo-api"} > 0
+    for: 5m
     labels:
       severity: critical
     annotations:
-      summary: "Alerta de Falha Silenciosa: API de Previsão de Chuva caiu!"
-      description: "O sistema Boca de Lobo perdeu comunicação com os radares de tempestade. Risco de alagamentos sem aviso prévio."
+      summary: "Mapa do cidadão desatualizado"
+      description: "O mapa servido foi gerado há mais de 26 h: o pipeline de dados (Airflow/Databricks/Lambda) não publicou o retrato do dia. Moradores podem estar vendo risco antigo."
+
+  - alert: MapaIndisponivel
+    expr: absent(mapa_total_pontos{job="boca-de-lobo-api"}) or mapa_total_pontos{job="boca-de-lobo-api"} == 0
+    for: 2m
+    labels:
+      severity: critical
+    annotations:
+      summary: "API sem mapa para servir"
+      description: "A API não conseguiu carregar nenhum mapa do DynamoDB (endpoint /api/v1/mapa responde 503)."
+
+  - alert: FalhaLeituraDynamo
+    expr: increase(mapa_leitura_falhas_total{job="boca-de-lobo-api"}[10m]) > 3
+    for: 0m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Falhas ao ler o DynamoDB"
+      description: "A API está servindo a última versão em cache porque a leitura do DynamoDB falhou repetidamente."
 
   - alert: HighErrorRate
     expr: |

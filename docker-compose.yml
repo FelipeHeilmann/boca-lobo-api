@@ -1,14 +1,51 @@
-# Stack de produção executada no EC2 (imagem vinda do ECR, sem build e sem segredos)
-# IMAGE_URI é gravado em /opt/boca-de-lobo/.env pelo job de deploy (via SSM).
+# Stack de produção executada no EC2 (imagens do ECR/Docker Hub, sem build e sem segredos).
+# Variáveis gravadas em /opt/boca-de-lobo/.env pelo job de deploy (via SSM):
+#   IMAGE_URI, SITE_HOST, DYNAMODB_TABLE, AWS_REGION, CORS_ORIGINS
+# A API lê o DynamoDB com a IAM Role da instância (IMDSv2), sem nenhuma chave.
 services:
+  proxy:
+    image: caddy:2.10.0-alpine
+    container_name: boca-de-lobo-proxy
+    restart: unless-stopped
+    environment:
+      SITE_HOST: ${SITE_HOST:?defina SITE_HOST}
+    ports:
+      - "80:8080"    # ACME (Let's Encrypt) + redirect para HTTPS
+      - "443:8443"   # HTTPS público
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/data:/data        # certificados (persistem entre deploys)
+      - ./caddy/config:/config
+    user: "10002:10002"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    pids_limit: 100
+    depends_on:
+      api:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   api:
     image: ${IMAGE_URI:?defina IMAGE_URI}
     container_name: boca-de-lobo-api
     restart: unless-stopped
     environment:
       ENVIRONMENT: production
-    ports:
-      - "80:8000"   # host:80 -> container:8000 (o processo não-root não pode abrir porta < 1024)
+      DYNAMODB_TABLE: ${DYNAMODB_TABLE:?defina DYNAMODB_TABLE}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+    expose:
+      - "8000"     # só na rede interna do compose; acesso público apenas via proxy
     user: "10001:10001"
     read_only: true
     tmpfs:

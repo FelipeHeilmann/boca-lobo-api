@@ -60,6 +60,20 @@ jobs:
           docker run --rm -v "$PWD:/src" -w /src "$TRIVY_IMAGE" config \
             --severity HIGH,CRITICAL --exit-code 1 --ignorefile .trivyignore terraform/
 
+  # ------------------------------------------------------------------ TESTES
+  tests:
+    name: Testes (API + Lambda)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Instala dependências
+        run: pip install -r app/requirements.txt pytest==8.4.2 "httpx<0.29"
+      - name: pytest
+        run: python -m pytest -q app/tests lambda/ingestor/tests
+
   # ---------------------------------------------------- BUILD + IMAGE SCAN
   build-scan:
     name: Docker build + Trivy image
@@ -77,6 +91,10 @@ jobs:
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY_IMAGE" image \
             --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
             "$IMAGE_NAME:$GITHUB_SHA"
+      - name: Trivy na imagem do proxy (Caddy, terceiro) — informativo
+        run: |
+          docker run --rm "$TRIVY_IMAGE" image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 \
+            "$(grep -oE 'caddy:[^ ]+' docker-compose.yml)"
       - name: Exporta imagem
         if: github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request'
         run: docker save "$IMAGE_NAME:$GITHUB_SHA" | gzip > image.tar.gz
@@ -91,7 +109,7 @@ jobs:
   infra:
     name: Terraform apply
     if: github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request'
-    needs: [gitleaks, semgrep, terraform-check, build-scan]
+    needs: [gitleaks, semgrep, terraform-check, tests, build-scan]
     runs-on: ubuntu-latest
     environment: production
     concurrency:
@@ -110,6 +128,8 @@ jobs:
       instance_id: ${{ steps.out.outputs.instance_id }}
       public_ip: ${{ steps.out.outputs.public_ip }}
       ecr_repository_url: ${{ steps.out.outputs.ecr_repository_url }}
+      site_host: ${{ steps.out.outputs.site_host }}
+      dynamodb_table: ${{ steps.out.outputs.dynamodb_table }}
     defaults:
       run:
         working-directory: terraform
@@ -136,6 +156,8 @@ jobs:
             echo "instance_id=$(terraform output -raw instance_id)"
             echo "public_ip=$(terraform output -raw public_ip)"
             echo "ecr_repository_url=$(terraform output -raw ecr_repository_url)"
+            echo "site_host=$(terraform output -raw site_host)"
+            echo "dynamodb_table=$(terraform output -raw dynamodb_table)"
           } >> "$GITHUB_OUTPUT"
 
   # ----------------------------------------------------- DEPLOY (ECR + SSM)
@@ -155,6 +177,9 @@ jobs:
       INSTANCE_ID: ${{ needs.infra.outputs.instance_id }}
       PUBLIC_IP: ${{ needs.infra.outputs.public_ip }}
       ECR_URL: ${{ needs.infra.outputs.ecr_repository_url }}
+      SITE_HOST: ${{ needs.infra.outputs.site_host }}
+      DYNAMODB_TABLE: ${{ needs.infra.outputs.dynamodb_table }}
+      CORS_ORIGINS: ${{ vars.CORS_ORIGINS || 'https://felipevoidela.github.io' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -186,18 +211,21 @@ jobs:
       - name: Deploy (docker compose) via SSM Run Command
         run: |
           REGISTRY="${ECR_URL%%/*}"
-          COMPOSE_B64=$(base64 -w0 docker-compose.yml)
+          BUNDLE_B64=$(tar czf - docker-compose.yml caddy/Caddyfile | base64 -w0)
+          ENV_B64=$(printf 'IMAGE_URI=%s\nSITE_HOST=%s\nDYNAMODB_TABLE=%s\nAWS_REGION=%s\nCORS_ORIGINS=%s\n' \
+            "$ECR_URL:$GITHUB_SHA" "$SITE_HOST" "$DYNAMODB_TABLE" "$AWS_REGION" "$CORS_ORIGINS" | base64 -w0)
           jq -n \
-            --arg b64 "$COMPOSE_B64" \
-            --arg image "$ECR_URL:$GITHUB_SHA" \
+            --arg bundle "$BUNDLE_B64" \
+            --arg env "$ENV_B64" \
             --arg registry "$REGISTRY" \
             --arg region "$AWS_REGION" \
             '{commands: [
               "set -eu",
               "cloud-init status --wait > /dev/null || true",
               "cd /opt/boca-de-lobo",
-              "echo \($b64) | base64 -d > docker-compose.yml",
-              "printf \"IMAGE_URI=%s\\n\" \"\($image)\" > .env",
+              "echo \($bundle) | base64 -d | tar xzf -",
+              "echo \($env) | base64 -d > .env",
+              "mkdir -p caddy/data caddy/config && chown -R 10002:10002 caddy/data caddy/config",
               "aws ecr get-login-password --region \($region) | docker login --username AWS --password-stdin \($registry)",
               "docker compose pull",
               "docker compose up -d --remove-orphans",
@@ -229,11 +257,12 @@ jobs:
             --query '{Out:StandardOutputContent,Err:StandardErrorContent}' --output text
           test "$status" = "Success"
 
-      - name: Smoke test
+      - name: Smoke test (HTTPS)
         run: |
-          for i in $(seq 1 12); do
-            if curl -fsS "http://$PUBLIC_IP/health"; then
-              echo; echo "MVP no ar: http://$PUBLIC_IP/api/v1/bocas-risco"
+          # o primeiro deploy emite o certificado (Let's Encrypt): pode levar ~1 min
+          for i in $(seq 1 36); do
+            if curl -fsS "https://$SITE_HOST/health"; then
+              echo; echo "API no ar: https://$SITE_HOST/api/v1/mapa"
               exit 0
             fi
             sleep 5

@@ -86,7 +86,7 @@
     {
       "id": 2,
       "type": "stat",
-      "title": "API de chuva (Open-Meteo)",
+      "title": "Idade do mapa (dados)",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -100,7 +100,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "rain_api_up{job=\"boca-de-lobo-api\"}",
+          "expr": "(time() - mapa_gerado_em_timestamp_seconds{job=\"boca-de-lobo-api\"}) and mapa_gerado_em_timestamp_seconds{job=\"boca-de-lobo-api\"} > 0",
           "legendFormat": "",
           "datasource": {
             "type": "prometheus",
@@ -110,35 +110,27 @@
       ],
       "fieldConfig": {
         "defaults": {
+          "unit": "s",
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "green",
                 "value": null
               },
               {
-                "color": "green",
-                "value": 1
+                "color": "orange",
+                "value": 86400
+              },
+              {
+                "color": "red",
+                "value": 93600
               }
             ]
           },
           "color": {
             "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "0": {
-                  "text": "DOWN"
-                },
-                "1": {
-                  "text": "UP"
-                }
-              }
-            }
-          ]
+          }
         },
         "overrides": []
       },
@@ -150,7 +142,8 @@
             "lastNotNull"
           ]
         }
-      }
+      },
+      "description": "Tempo desde que a camada Ouro gerou o mapa servido. Alerta acima de 26 h."
     },
     {
       "id": 3,

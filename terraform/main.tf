@@ -5,6 +5,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.80"
     }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.7"
+    }
   }
 
   # State remoto em S3 (fora do repositório), com lock nativo.
@@ -42,9 +46,18 @@ resource "aws_security_group" "app" {
   description = "MVP Boca de Lobo - somente porta da API publica; admin via SSM"
   vpc_id      = data.aws_vpc.default.id
 
-  # API pública do MVP na porta 80 (também raspada pelo Prometheus local em /metrics)
+  # HTTPS público da API (Caddy com certificado Let's Encrypt)
   ingress {
-    description = "API HTTP publica do MVP"
+    description = "API HTTPS publica do MVP"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"] # trivy:ignore:AVD-AWS-0107
+  }
+
+  # HTTP: apenas desafio ACME do Let's Encrypt e redirecionamento para HTTPS
+  ingress {
+    description = "HTTP para ACME e redirect HTTPS"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"

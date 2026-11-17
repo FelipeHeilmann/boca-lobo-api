@@ -24,3 +24,9 @@ __pycache__/
 
 # SO
 .DS_Store
+
+# Artefatos de build do Terraform (zip da Lambda)
+terraform/.build/
+
+# Repositório do time de dados (versionado no próprio repo deles)
+mvp/
