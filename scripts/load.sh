@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Gera tráfego contra o MVP para popular o dashboard dos 4 sinais de ouro.
 # Uso: scripts/load.sh <host:porta> [duração_em_segundos]
-#   ex.: scripts/load.sh 3.85.10.20:8000 300
+#   ex.: scripts/load.sh 3.85.10.20:80 300
 set -euo pipefail
 
-TARGET="${1:?informe host:porta, ex.: 3.85.10.20:8000}"
+TARGET="${1:?informe host:porta, ex.: 3.85.10.20:80}"
 DURATION="${2:-300}"
 END=$(( $(date +%s) + DURATION ))
 

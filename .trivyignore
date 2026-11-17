@@ -1,7 +1,7 @@
 # Achados aceitos conscientemente (revisar a cada mudança de arquitetura).
 # Também marcados inline em terraform/main.tf com "# trivy:ignore:<ID>".
 
-# SG com ingress 0.0.0.0/0 na porta 8000: é a API pública do MVP (não é porta admin).
+# SG com ingress 0.0.0.0/0 na porta 80: é a API pública do MVP (não é porta admin).
 AVD-AWS-0107
 # Egress 0.0.0.0/0: necessário para Open-Meteo, ECR, SSM e atualizações do SO.
 AVD-AWS-0104

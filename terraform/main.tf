@@ -42,11 +42,11 @@ resource "aws_security_group" "app" {
   description = "MVP Boca de Lobo - somente porta da API publica; admin via SSM"
   vpc_id      = data.aws_vpc.default.id
 
-  # API pública do MVP (também raspada pelo Prometheus local em /metrics)
+  # API pública do MVP na porta 80 (também raspada pelo Prometheus local em /metrics)
   ingress {
     description = "API HTTP publica do MVP"
-    from_port   = 8000
-    to_port     = 8000
+    from_port   = 80
+    to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"] # trivy:ignore:AVD-AWS-0107
   }

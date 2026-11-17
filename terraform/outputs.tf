@@ -15,10 +15,10 @@ output "ecr_repository_url" {
 
 output "url_api" {
   description = "URL pública oficial do MVP no ar"
-  value       = "http://${aws_eip.app.public_ip}:8000/api/v1/bocas-risco"
+  value       = "http://${aws_eip.app.public_ip}/api/v1/bocas-risco"
 }
 
 output "url_metrics" {
   description = "URL pública de métricas do Prometheus"
-  value       = "http://${aws_eip.app.public_ip}:8000/metrics"
+  value       = "http://${aws_eip.app.public_ip}/metrics"
 }

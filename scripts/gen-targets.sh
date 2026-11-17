@@ -16,10 +16,10 @@ mkdir -p "$ROOT/monitoring/targets"
 cat > "$ROOT/monitoring/targets/api.json" <<EOF
 [
   {
-    "targets": ["${IP}:8000"],
+    "targets": ["${IP}:80"],
     "labels": { "env": "production", "service": "boca-de-lobo-api" }
   }
 ]
 EOF
 
-echo "Alvo do Prometheus: http://${IP}:8000/metrics"
+echo "Alvo do Prometheus: http://${IP}/metrics"

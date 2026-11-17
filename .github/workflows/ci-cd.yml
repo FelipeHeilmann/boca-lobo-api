@@ -232,8 +232,8 @@ jobs:
       - name: Smoke test
         run: |
           for i in $(seq 1 12); do
-            if curl -fsS "http://$PUBLIC_IP:8000/health"; then
-              echo; echo "MVP no ar: http://$PUBLIC_IP:8000/api/v1/bocas-risco"
+            if curl -fsS "http://$PUBLIC_IP/health"; then
+              echo; echo "MVP no ar: http://$PUBLIC_IP/api/v1/bocas-risco"
               exit 0
             fi
             sleep 5
