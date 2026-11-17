@@ -13,7 +13,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import boto3
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -60,10 +60,13 @@ def dynamo():
     return _dynamo
 
 
+FUSO_PADRAO = timezone(timedelta(hours=-3))  # exports antigos sem fuso: horário de São Paulo
+
+
 def _epoch(gerado_em: str) -> float:
-    dt = datetime.fromisoformat(gerado_em)
-    if dt.tzinfo is None:  # current_timestamp() do Databricks é UTC
-        dt = dt.replace(tzinfo=timezone.utc)
+    dt = datetime.fromisoformat(gerado_em.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=FUSO_PADRAO)
     return dt.timestamp()
 
 
@@ -78,7 +81,7 @@ def ler_mapa_dynamo() -> dict | None:
         "limiar_chuva_mm": float(item["limiar_chuva_mm"]["N"]) if "limiar_chuva_mm" in item else None,
         "pontos": json.loads(gzip.decompress(item["pontos_gz"]["B"])),
     }
-    MAPA_GERADO_EM.set(_epoch(mapa["gerado_em"]))
+    MAPA_GERADO_EM.set(_epoch(item.get("gerado_em_utc", item["gerado_em"])["S"]))
     MAPA_TOTAL_PONTOS.set(len(mapa["pontos"]))
     return mapa
 

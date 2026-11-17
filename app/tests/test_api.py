@@ -75,3 +75,15 @@ def test_falha_no_dynamo_mantem_ultima_versao(monkeypatch):
         main.atualizar_cache()
         assert c.get("/api/v1/mapa").status_code == 200
         assert "mapa_leitura_falhas_total 1.0" in c.get("/metrics").text
+
+
+def test_idade_do_mapa_usa_gerado_em_utc(monkeypatch):
+    item = item_dynamo()
+    item["gerado_em"] = {"S": "2026-11-17T23:00:00+00:00"}
+    item["gerado_em_utc"] = {"S": "2026-11-17T23:00:00.000000Z"}
+    with cliente(monkeypatch, FakeDynamo(item)) as c:
+        assert "mapa_gerado_em_timestamp_seconds 1.7949564e+09" in c.get("/metrics").text
+
+
+def test_export_antigo_sem_fuso_e_horario_de_sp():
+    assert main._epoch("2026-11-08 18:53:45") == main._epoch("2026-11-08T21:53:45Z")

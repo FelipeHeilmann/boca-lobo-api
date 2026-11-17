@@ -16,7 +16,7 @@ import gzip
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from urllib.parse import unquote_plus
 
@@ -42,6 +42,8 @@ CAMPOS_OBRIGATORIOS = {
 # Retângulo que contém a Região Metropolitana de São Paulo (mesmo do preview_local.py do time de dados)
 LAT_MIN, LAT_MAX = -24.10, -23.20
 LON_MIN, LON_MAX = -47.00, -46.20
+# Exports antigos do notebook 03 saíam sem fuso, no horário de São Paulo (sessão Spark America/Sao_Paulo).
+FUSO_PADRAO = timezone(timedelta(hours=-3))
 
 _s3 = None
 _dynamo = None
@@ -65,6 +67,14 @@ class ArquivoInvalido(ValueError):
     """Conteúdo recusado pela validação."""
 
 
+def gerado_em_utc(valor: str) -> str:
+    """Normaliza gerado_em para UTC em formato fixo (comparável como texto). Sem fuso = horário de SP."""
+    dt = datetime.fromisoformat(str(valor))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=FUSO_PADRAO)
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
 def validar(doc: object) -> dict:
     """Valida o export da Ouro e devolve o documento. Lança ArquivoInvalido com o motivo."""
     if not isinstance(doc, dict):
@@ -73,7 +83,7 @@ def validar(doc: object) -> dict:
         if campo not in doc:
             raise ArquivoInvalido(f"campo obrigatório ausente: {campo}")
     try:
-        datetime.fromisoformat(str(doc["gerado_em"]))
+        gerado_em_utc(doc["gerado_em"])
     except ValueError as exc:
         raise ArquivoInvalido(f"gerado_em inválido: {doc['gerado_em']!r}") from exc
 
@@ -104,6 +114,7 @@ def montar_item(doc: dict, origem: str) -> dict:
     item = {
         "pk": {"S": CHAVE_ITEM},
         "gerado_em": {"S": str(doc["gerado_em"])},
+        "gerado_em_utc": {"S": gerado_em_utc(doc["gerado_em"])},
         "fonte": {"S": str(doc.get("fonte", "desconhecida"))},
         "total_pontos": {"N": str(len(doc["pontos"]))},
         "arquivo_origem": {"S": origem},
@@ -121,8 +132,9 @@ def publicar(item: dict) -> bool:
         dynamo().put_item(
             TableName=TABELA,
             Item=item,
-            ConditionExpression="attribute_not_exists(pk) OR gerado_em <= :g",
-            ExpressionAttributeValues={":g": item["gerado_em"]},
+            # itens antigos não têm gerado_em_utc: podem ser substituídos
+            ConditionExpression="attribute_not_exists(gerado_em_utc) OR gerado_em_utc <= :g",
+            ExpressionAttributeValues={":g": item["gerado_em_utc"]},
         )
         return True
     except ClientError as exc:

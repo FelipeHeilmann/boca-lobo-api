@@ -104,3 +104,20 @@ def test_chave_com_espaco_codificado(ambiente):
     fs3, _ = ambiente(json.dumps(doc()).encode())
     handler.lambda_handler(evento("entrada/mapa+cidadao.json"), None)
     assert fs3.removidos == ["entrada/mapa cidadao.json"]
+
+
+@pytest.mark.parametrize("entrada,esperado", [
+    ("2026-11-08 18:53:45.379444", "2026-11-08T21:53:45.379444Z"),  # export antigo: horário de SP, sem fuso
+    ("2026-11-17T23:00:00+00:00", "2026-11-17T23:00:00.000000Z"),   # export novo: UTC com fuso
+    ("2026-11-17T20:00:00-03:00", "2026-11-17T23:00:00.000000Z"),
+])
+def test_gerado_em_normalizado_para_utc(entrada, esperado):
+    assert handler.gerado_em_utc(entrada) == esperado
+
+
+def test_escrita_condicional_usa_utc(ambiente):
+    _, fdb = ambiente(json.dumps(doc(gerado_em="2026-11-17T23:00:00+00:00")).encode())
+    handler.lambda_handler(evento(), None)
+    put = fdb.itens[0]
+    assert put["ExpressionAttributeValues"][":g"] == {"S": "2026-11-17T23:00:00.000000Z"}
+    assert "gerado_em_utc" in put["ConditionExpression"]
