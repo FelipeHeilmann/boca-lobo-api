@@ -24,7 +24,12 @@ echo "Aguardando a Lambda processar..."
 for _ in $(seq 1 20); do
   sleep 3
   if aws s3api head-object --bucket "$BUCKET" --key "processado/${CHAVE#entrada/}" > /dev/null 2>&1; then
-    echo "OK: publicado (processado/${CHAVE#entrada/})"; exit 0
+    status=$(aws s3api head-object --bucket "$BUCKET" --key "processado/${CHAVE#entrada/}" --query 'Metadata.status' --output text)
+    case "$status" in
+      publicado) echo "OK: publicado (processado/${CHAVE#entrada/})"; exit 0 ;;
+      ignorado_mais_antigo) echo "IGNORADO: o mapa no ar é mais recente que este arquivo (gerado_em mais antigo)"; exit 2 ;;
+      *) echo "Processado (status: ${status})"; exit 0 ;;
+    esac
   fi
   if aws s3api head-object --bucket "$BUCKET" --key "quarentena/${CHAVE#entrada/}" > /dev/null 2>&1; then
     motivo=$(aws s3api head-object --bucket "$BUCKET" --key "quarentena/${CHAVE#entrada/}" --query 'Metadata.motivo' --output text)

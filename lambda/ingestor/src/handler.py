@@ -166,8 +166,8 @@ def processar(bucket: str, chave: str) -> dict:
         return {"status": "rejeitado", "motivo": motivo, "destino": destino}
 
     publicado = publicar(montar_item(doc, origem))
-    destino = mover(bucket, chave, "processado")
     status = "publicado" if publicado else "ignorado_mais_antigo"
+    destino = mover(bucket, chave, "processado", {"status": status})
     logger.info(json.dumps({
         "evento": "ingestao_concluida", "status": status, "origem": origem, "destino": destino,
         "gerado_em": str(doc["gerado_em"]), "total_pontos": len(doc["pontos"]),

@@ -72,7 +72,7 @@ def test_arquivo_valido_publica_e_move_para_processado(ambiente):
     item = fdb.itens[0]["Item"]
     assert item["pk"] == {"S": "mapa_atual"}
     assert json.loads(gzip.decompress(item["pontos_gz"]["B"]))[0]["id_bueiro"] == "BL-0001"
-    assert fs3.copias[0][0] == "processado/mapa_cidadao_2026-11-08.json"
+    assert fs3.copias[0] == ("processado/mapa_cidadao_2026-11-08.json", {"status": "publicado"})
     assert fs3.removidos == ["entrada/mapa_cidadao_2026-11-08.json"]
 
 
@@ -98,6 +98,7 @@ def test_arquivo_mais_antigo_nao_sobrescreve(ambiente):
     r = handler.lambda_handler(evento(), None)["resultados"][0]
     assert r["status"] == "ignorado_mais_antigo"
     assert fs3.copias[0][0].startswith("processado/")
+    assert fs3.copias[0][1] == {"status": "ignorado_mais_antigo"}
 
 
 def test_chave_com_espaco_codificado(ambiente):
