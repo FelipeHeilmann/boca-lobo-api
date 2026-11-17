@@ -1,0 +1,26 @@
+# Terraform: state e variáveis nunca vão para o repositório
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+crash.log
+
+# Segredos locais
+.env
+.env.*
+!.env.example
+
+# Monitoramento local
+monitoring/targets/*.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# SO
+.DS_Store

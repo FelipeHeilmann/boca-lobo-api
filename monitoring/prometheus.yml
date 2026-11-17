@@ -1,0 +1,20 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+rule_files:
+  - /etc/prometheus/alert_rules.yml
+
+scrape_configs:
+  # Alvo = MVP publicado no EC2. O arquivo targets/api.json é gerado por
+  # scripts/gen-targets.sh a partir do output do Terraform (ou manualmente).
+  - job_name: 'boca-de-lobo-api'
+    metrics_path: /metrics
+    file_sd_configs:
+      - files: ['/etc/prometheus/targets/*.json']
+        refresh_interval: 30s

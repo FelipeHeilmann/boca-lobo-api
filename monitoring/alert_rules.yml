@@ -1,0 +1,41 @@
+groups:
+- name: BocaDeLoboAlerts
+  rules:
+  - alert: ApiDown
+    expr: up{job="boca-de-lobo-api"} == 0
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "MVP Boca de Lobo fora do ar"
+      description: "O Prometheus não consegue raspar {{ $labels.instance }} há mais de 1 minuto."
+
+  - alert: PrevisaoChuvaApiDown
+    expr: rain_api_up == 0
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Alerta de Falha Silenciosa: API de Previsão de Chuva caiu!"
+      description: "O sistema Boca de Lobo perdeu comunicação com os radares de tempestade. Risco de alagamentos sem aviso prévio."
+
+  - alert: HighErrorRate
+    expr: |
+      sum(rate(http_requests_total{job="boca-de-lobo-api",http_status=~"5.."}[2m]))
+        / clamp_min(sum(rate(http_requests_total{job="boca-de-lobo-api"}[2m])), 1e-9) > 0.05
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Taxa de erros 5xx acima de 5%"
+      description: "Mais de 5% das requisições estão falhando nos últimos 2 minutos."
+
+  - alert: HighLatencyP95
+    expr: |
+      histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job="boca-de-lobo-api"}[5m]))) > 2
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Latência p95 acima de 2s"
+      description: "O p95 de latência está acima de 2 segundos há 5 minutos."

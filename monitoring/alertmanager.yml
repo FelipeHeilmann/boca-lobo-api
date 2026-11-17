@@ -1,0 +1,12 @@
+# Alertmanager local: apenas recebe e exibe os alertas (UI em http://localhost:9093).
+# Para notificar de verdade, adicione um receiver (e-mail, Slack, webhook) usando
+# segredos locais — nunca commitados.
+route:
+  receiver: default
+  group_by: ['alertname']
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 1h
+
+receivers:
+  - name: default
