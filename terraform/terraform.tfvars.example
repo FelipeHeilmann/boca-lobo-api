@@ -1,0 +1,9 @@
+# Copie para terraform.tfvars (ignorado pelo git) apenas para execução local.
+# Na pipeline estes valores vêm de GitHub Variables/Secrets via TF_VAR_*.
+aws_region    = "us-east-1"
+project       = "boca-de-lobo"
+instance_type = "t3.micro"
+
+# Opcional: libera SSH apenas para o seu IP. Deixe [] para usar somente SSM.
+# 0.0.0.0/0 é rejeitado pela validação.
+admin_cidrs = []
