@@ -4,6 +4,15 @@
 
 ## 1. Pipeline barrada
 
+### 1a. Semgrep — actions com tag mutável (supply chain)
+- **Run:** <link da execução>
+- **Job que barrou:** `Semgrep (SAST)`, regra `github-actions-mutable-action-tag` (14 achados)
+- **Motivo:** `uses: actions/checkout@v4` etc. podem ser reapontados pelo dono da action (caso trivy-action)
+- **Correção:** todas as actions fixadas por SHA de 40 caracteres (`# vX.Y.Z` em comentário) + Dependabot para atualizá-las
+- Print: `![semgrep barrou](img/semgrep-barrado.png)`
+
+### 1b. Trivy — dependências vulneráveis
+
 - **Commit:** `<sha>` — dependências desatualizadas (`fastapi==0.110.0` → starlette 0.36.x, `requests==2.31.0`)
 - **Run:** <link da execução>
 - **Job que barrou:** `Docker build + Trivy image`
