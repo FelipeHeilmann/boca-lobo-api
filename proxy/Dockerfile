@@ -12,9 +12,16 @@
 
 # ---- build ----
 FROM caddy:2.11.9-builder-alpine AS builder
+# A imagem builder oficial define XCADDY_SETCAP=1, que faz o xcaddy gravar cap_net_bind_service
+# no binário (e o COPY --from preserva esse atributo). Desligamos e, por garantia, removemos a marca.
+ENV XCADDY_SETCAP=0
 RUN xcaddy build v2.11.9 \
       --replace golang.org/x/net=golang.org/x/net@v0.63.0 \
-      --output /usr/bin/caddy
+      --output /usr/bin/caddy && \
+    (setcap -r /usr/bin/caddy 2>/dev/null || true) && \
+    if command -v getcap > /dev/null && [ -n "$(getcap /usr/bin/caddy)" ]; then \
+      echo "caddy ainda tem file capability" >&2; exit 1; \
+    fi
 
 # ---- runtime ----
 FROM caddy:2.11.9-alpine
