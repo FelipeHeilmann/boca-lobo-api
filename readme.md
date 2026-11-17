@@ -15,7 +15,7 @@ O **Boca de Lobo** é um MVP de engenharia de software focado em segurança e em
 | Execução | Docker Compose no EC2 (`docker-compose.yml`) |
 | Nuvem (IaC) | Terraform na AWS: EC2 + SG + EIP + ECR + IAM; state remoto em S3 com lock |
 | Acesso admin | **Nenhuma porta admin aberta** — administração via AWS SSM. SSH opcional só para `/32`; `0.0.0.0/0` é rejeitado pela validação |
-| CI/CD | GitHub Actions: Gitleaks, Semgrep, Terraform validate, Trivy (config + imagem) a cada push; na `main`: `terraform apply` + deploy via SSM |
+| CI/CD | GitHub Actions: Gitleaks, Semgrep, Terraform validate, Trivy (config + imagem) a cada push; na `master`: `terraform apply` + deploy via SSM |
 | Autenticação na AWS | GitHub OIDC → IAM Role (sem access keys) |
 | Observabilidade | Prometheus + Alertmanager + Grafana locais apontando para o MVP publicado |
 
@@ -59,13 +59,13 @@ docker compose down
 ### 2. Conferir a role de deploy na AWS
 A IAM Role, o OIDC provider e o bucket do state são mantidos em um **repositório separado**; este projeto apenas assume a role via OIDC. Confira em [docs/aws-role.md](docs/aws-role.md) se:
 
-- a trust policy aceita `repo:CarlosECRibeiro/boca_de_lobo_fiap:environment:production`;
+- a trust policy aceita `repo:FelipeHeilmann/boca-lobo-api:environment:production`;
 - a role tem as permissões de S3 (prefixo `boca-de-lobo/*`), EC2, ECR, IAM (`boca-lobo-*`) e SSM listadas lá.
 
 Anote o **ARN da role** e o **nome do bucket** para o próximo passo.
 
 ### 3. Configurar o GitHub
-Em **Settings → Environments → New environment** crie `production` (em *Deployment branches* restrinja a `main`). Dentro dele cadastre:
+Em **Settings → Environments → New environment** crie `production` (em *Deployment branches* restrinja a `master`). Dentro dele cadastre:
 
 | Nome | Tipo | Valor |
 |---|---|---|
@@ -79,11 +79,11 @@ Não é necessário cadastrar `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`: a pip
 
 ### 4. Deploy
 ```bash
-git push origin main
+git push origin master
 ```
 A pipeline (`.github/workflows/ci-cd.yml`) executa:
 
-| Job | Em todo push | Só na `main` |
+| Job | Em todo push | Só na `master` |
 |---|---|---|
 | Gitleaks | ✅ | |
 | Semgrep | ✅ | |

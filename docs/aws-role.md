@@ -22,7 +22,7 @@ Os jobs `infra` e `deploy` rodam no environment **`production`**, então o claim
     "Condition": {
       "StringEquals": {
         "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-        "token.actions.githubusercontent.com:sub": "repo:CarlosECRibeiro/boca_de_lobo_fiap:environment:production"
+        "token.actions.githubusercontent.com:sub": "repo:FelipeHeilmann/boca-lobo-api:environment:production"
       }
     }
   }]

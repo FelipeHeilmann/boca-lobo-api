@@ -11,13 +11,17 @@
 - **Correção:** todas as actions fixadas por SHA de 40 caracteres (`# vX.Y.Z` em comentário) + Dependabot para atualizá-las
 - Print: `![semgrep barrou](img/semgrep-barrado.png)`
 
-### 1b. Trivy — dependências vulneráveis
+### 1b. Trivy — imagem com vulnerabilidades HIGH
+- **Commit:** `d67fe95` · **Run:** <link da execução>
+- **Job que barrou:** `Docker build + Trivy image` — 9 achados HIGH:
 
-- **Commit:** `<sha>` — dependências desatualizadas (`fastapi==0.110.0` → starlette 0.36.x, `requests==2.31.0`)
-- **Run:** <link da execução>
-- **Job que barrou:** `Docker build + Trivy image`
-- **Motivo:** CVEs HIGH com correção disponível (ex.: starlette CVE-2024-47874)
-- Print: `![pipeline barrada](img/pipeline-barrada.png)`
+| Origem | Pacote | CVE | Correção aplicada |
+|---|---|---|---|
+| Dependência da app | starlette 0.36.3 (via fastapi 0.110.0) | CVE-2024-47874, CVE-2026-48818, CVE-2026-54283 | `fastapi==0.163.1` (starlette ≥ 1.3.1) |
+| Ferramentas de build na imagem | setuptools 70.3.0, wheel 0.45.1, jaraco.context 5.3.0 | CVE-2025-47273, CVE-2026-24049, CVE-2026-23949 | `pip uninstall setuptools wheel pip` no venv e no Python do sistema (não usados em runtime) |
+| SO da imagem base (Debian 13) | zlib1g | CVE-2026-85091 | `apt-get upgrade` no estágio final |
+
+- Print: `![trivy barrou](img/trivy-barrado.png)`
 
 ## 2. Pipeline corrigida
 

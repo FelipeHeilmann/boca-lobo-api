@@ -5,8 +5,10 @@ WORKDIR /build
 RUN python -m venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH
 COPY requirements.txt .
+# Ferramentas de empacotamento não são usadas em runtime: removê-las reduz a superfície de ataque
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.txt && \
+    pip uninstall -y setuptools wheel pip
 
 # Estágio 2: Imagem final enxuta, sem ferramentas de build e sem segredos
 FROM python:3.11-slim
@@ -14,8 +16,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH=/opt/venv/bin:$PATH
 
-# Usuário não-root sem shell de login
-RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin appuser
+# Patches de segurança do SO da imagem base + remoção do pip/setuptools/wheel do Python do sistema
+# + usuário não-root sem shell de login
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/* && \
+    python -m pip uninstall -y setuptools wheel pip && \
+    useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin appuser
 
 WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv

@@ -78,10 +78,10 @@ jobs:
             --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
             "$IMAGE_NAME:$GITHUB_SHA"
       - name: Exporta imagem
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request'
         run: docker save "$IMAGE_NAME:$GITHUB_SHA" | gzip > image.tar.gz
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request'
         with:
           name: image
           path: image.tar.gz
@@ -90,7 +90,7 @@ jobs:
   # ------------------------------------------------------ INFRA (Terraform)
   infra:
     name: Terraform apply
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request'
     needs: [gitleaks, semgrep, terraform-check, build-scan]
     runs-on: ubuntu-latest
     environment: production
