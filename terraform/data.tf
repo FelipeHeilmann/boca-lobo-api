@@ -358,3 +358,15 @@ resource "aws_iam_user_policy" "rpa" {
   user   = aws_iam_user.rpa.name
   policy = data.aws_iam_policy_document.rpa.json
 }
+
+# O usuário e a política do RPA foram criados pela CLI antes de entrarem no Terraform: estes blocos os trazem
+# para o state no próximo apply (sem recriar nada). Depois do primeiro apply podem ser removidos.
+import {
+  to = aws_iam_user.rpa
+  id = "boca-lobo-rpa"
+}
+
+import {
+  to = aws_iam_user_policy.rpa
+  id = "boca-lobo-rpa:boca-lobo-rpa-envio"
+}
