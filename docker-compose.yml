@@ -1,6 +1,6 @@
 # Stack de produção executada no EC2 (imagens do ECR, sem build e sem segredos).
 # Variáveis gravadas em /opt/boca-de-lobo/.env pelo job de deploy (via SSM):
-#   IMAGE_URI, PROXY_IMAGE_URI, SITE_HOST, DYNAMODB_TABLE, AWS_REGION, CORS_ORIGINS
+#   IMAGE_URI, PROXY_IMAGE_URI, SITE_HOST, DYNAMODB_TABLE, DYNAMODB_TABLE_RPA, AWS_REGION, CORS_ORIGINS
 # A API lê o DynamoDB com a IAM Role da instância (IMDSv2), sem nenhuma chave.
 services:
   proxy:
@@ -40,6 +40,7 @@ services:
     environment:
       ENVIRONMENT: production
       DYNAMODB_TABLE: ${DYNAMODB_TABLE:?defina DYNAMODB_TABLE}
+      DYNAMODB_TABLE_RPA: ${DYNAMODB_TABLE_RPA:-boca-lobo-dynamo-rpa}
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
