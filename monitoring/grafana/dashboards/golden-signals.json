@@ -202,7 +202,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "100 * sum(rate(http_requests_total{job=\"boca-de-lobo-api\",http_status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_requests_total{job=\"boca-de-lobo-api\"}[5m])), 1e-9)",
+          "expr": "100 * (sum(rate(http_requests_total{job=\"boca-de-lobo-api\",http_status=~\"5..\"}[5m])) or vector(0)) / clamp_min(sum(rate(http_requests_total{job=\"boca-de-lobo-api\"}[5m])), 1e-9)",
           "legendFormat": "",
           "datasource": {
             "type": "prometheus",
@@ -436,7 +436,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "100 * sum(rate(http_requests_total{job=\"boca-de-lobo-api\",http_status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_requests_total{job=\"boca-de-lobo-api\"}[5m])), 1e-9)",
+          "expr": "100 * (sum(rate(http_requests_total{job=\"boca-de-lobo-api\",http_status=~\"5..\"}[5m])) or vector(0)) / clamp_min(sum(rate(http_requests_total{job=\"boca-de-lobo-api\"}[5m])), 1e-9)",
           "legendFormat": "% 5xx",
           "datasource": {
             "type": "prometheus",
@@ -540,13 +540,80 @@
       "description": "CPU do processo, memória vs limite do container e concorrência."
     },
     {
-      "id": 99,
-      "type": "alertlist",
-      "title": "Alertas (Prometheus/Alertmanager)",
+      "id": 10,
+      "type": "stat",
+      "title": "Alertas disparados",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "gridPos": {
         "x": 0,
         "y": 20,
-        "w": 24,
+        "w": 6,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(ALERTS{alertstate=\"firing\"}) or vector(0)",
+          "legendFormat": "firing",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "count(ALERTS{alertstate=\"pending\"}) or vector(0)",
+          "legendFormat": "pending",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "description": "Quantidade de alertas do Prometheus em FIRING e PENDING. 0 = tudo normal."
+    },
+    {
+      "id": 99,
+      "type": "alertlist",
+      "title": "Alertas ativos (lista vazia = nenhum alerta disparado)",
+      "gridPos": {
+        "x": 6,
+        "y": 20,
+        "w": 18,
         "h": 6
       },
       "options": {

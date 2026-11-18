@@ -5,6 +5,64 @@
 ## 🎯 Objetivo do Projeto
 O **Boca de Lobo** é um MVP de engenharia de software focado em segurança e emergências urbanas (enchentes). Antes de cada temporal, o sistema cruza o status de obstrução de bueiros/sarjetas com previsões meteorológicas para disparar ações preventivas para a equipe de limpeza e alertas de rota segura para moradores de regiões de risco.
 
+## 🔗 Acesse a aplicação
+| Acesso | Link | O que é |
+|---|---|---|
+| Mapa do cidadão | [felipevoidela.github.io/GS2-2026-Big-Data-Architecture](https://felipevoidela.github.io/GS2-2026-Big-Data-Architecture/) | Frontend que consome a API e mostra onde não passar hoje |
+| Swagger (OpenAPI) | [98-86-45-71.sslip.io/docs](https://98-86-45-71.sslip.io/docs) | Documentação interativa; permite testar as rotas pelo navegador |
+| Mapa (JSON) | [/api/v1/mapa](https://98-86-45-71.sslip.io/api/v1/mapa) | Retrato atual servido ao frontend |
+| Resumo | [/api/v1/mapa/resumo](https://98-86-45-71.sslip.io/api/v1/mapa/resumo) | Contagem de bocas de lobo por nível de alerta |
+| Health check | [/health](https://98-86-45-71.sslip.io/health) | Estado da API e do carregamento do mapa |
+| Métricas | [/metrics](https://98-86-45-71.sslip.io/metrics) | Métricas Prometheus coletadas pelo Grafana |
+
+---
+
+<a id="arquitetura"></a>
+## 🏗️ Arquitetura
+
+![Diagrama de arquitetura na AWS](docs/arquitetura.png)
+
+> Fonte editável do diagrama: [`docs/arquitetura.drawio`](docs/arquitetura.drawio) (draw.io). No desenho, a Lambda aparece com o rótulo do bucket; o nome real do recurso no Terraform é `boca-lobo-lambda-ingestor`.
+
+### Fluxo de dados
+1. O **Databricks** gera o mapa diário na camada Ouro e envia o arquivo para `s3://boca-lobo-s3-ingestao/entrada/` usando o usuário IAM `boca-lobo-databricks`.
+2. O S3 emite o evento **object created**, que invoca a Lambda `boca-lobo-lambda-ingestor`.
+3. A Lambda valida estrutura, campos obrigatórios, níveis de alerta (`EVITE A AREA`, `ATENCAO`, `NORMAL`), coordenadas dentro da Região Metropolitana de São Paulo, IDs duplicados e tamanho máximo de 5 MB.
+4. **Arquivo válido:** grava o item `mapa_atual` no DynamoDB com escrita condicional (um arquivo mais antigo nunca sobrescreve um mais novo) e move o original para `processado/`. **Arquivo inválido:** vai para `quarentena/` com o motivo nos metadados, e o mapa continua com a última versão boa.
+5. A **API no EC2** lê o DynamoDB a cada 60 s e mantém o mapa em cache na memória. Se o DynamoDB falhar, continua servindo a última versão válida.
+6. O **portal do cidadão** consulta a API por HTTPS e desenha o mapa com as áreas a evitar.
+
+### Componentes
+| Componente (no diagrama) | Serviço | Papel na solução |
+|---|---|---|
+| `data-bricks` | Databricks (fora da AWS) | Executa os notebooks Bronze/Prata/Ouro e gera o `mapa_cidadao.json` com as bocas de lobo e o nível de alerta de cada uma |
+| `boca-lobo-databricks` | IAM User | Identidade técnica do Databricks; só pode gravar (`s3:PutObject`) em `entrada/` |
+| `s3: putObject` | IAM Policy | Política de menor privilégio do usuário acima: não lê, não lista e não apaga nada |
+| `boca-lobo-s3-ingestao` | Amazon S3 | Bucket privado, versionado e criptografado; recebe o export em `entrada/`, guarda o histórico em `processado/` (90 dias) e os recusados em `quarentena/` (30 dias); exige HTTPS |
+| `object created` | Evento S3 | Notificação `s3:ObjectCreated` filtrada por `entrada/*.json`, que dispara a Lambda |
+| Lambda | AWS Lambda | `boca-lobo-lambda-ingestor` (Python 3.12, arm64, 256 MB): valida o JSON, publica no DynamoDB e move o arquivo |
+| `boca-lobo-dynamo-mapa` | Amazon DynamoDB | Tabela provisionada (5 RCU / 12 WCU) com um único item `mapa_atual` contendo os pontos compactados em gzip (~11 KB) |
+| `CitizenTech-BocaDeLobo-MVP` | Amazon EC2 | `t3.micro` (Ubuntu 24.04) com Elastic IP, executando os containers Caddy e API; lê o DynamoDB com a IAM Role da instância |
+| `portal` | Frontend web | Mapa do cidadão (GitHub Pages) que consome a API via HTTPS |
+
+Recursos de apoio que não aparecem no diagrama: repositórios **ECR** (imagens da API e do proxy, com scan na publicação e retenção das 5 últimas), **CloudWatch Logs** e o alarme `boca-lobo-lambda-ingestor-erros`, **X-Ray** na Lambda, **AWS Systems Manager** (deploy e administração sem SSH) e o bucket do Terraform state.
+
+### Decisões de arquitetura
+- **Cache com atualização em segundo plano:** o DynamoDB recebe cerca de uma leitura por minuto, independentemente do número de visitantes, o que mantém a tabela no Always Free mesmo em picos de acesso durante uma tempestade.
+- **DynamoDB provisionado em vez de on-demand:** 5 RCU e 12 WCU ficam abaixo do limite gratuito permanente de 25 RCU/25 WCU por conta.
+- **Validação na entrada:** dados quebrados vindos do pipeline não chegam ao cidadão; ficam isolados em quarentena para análise.
+- **HTTPS sem domínio próprio:** o sslip.io resolve `98-86-45-71.sslip.io` para o Elastic IP, e o Caddy emite o certificado Let's Encrypt automaticamente.
+
+### Segurança por camada
+| Camada | Controles aplicados |
+|---|---|
+| Containers | Multi-stage `python:3.11-slim`, usuário não-root (API uid 10001, proxy uid 10002), `read_only`, `cap_drop: ALL`, `no-new-privileges`, limites de memória/CPU/processos, nenhum segredo na imagem |
+| Rede | Security Group só com 443 (HTTPS) e 80 (ACME e redirect); a API só é acessível pelo proxy; nenhuma porta admin aberta (administração via SSM) |
+| Instância | IMDSv2 obrigatório, EBS criptografado, `unattended-upgrades` |
+| HTTP | HSTS, `X-Content-Type-Options`, `Referrer-Policy`; CORS só para a origem do frontend e só `GET` |
+| Identidade | Menor privilégio por identidade (EC2 só `GetItem`, Lambda só o necessário, Databricks só `PutObject` em `entrada/`); pipeline via GitHub OIDC, sem access keys |
+| Dados | S3 privado, versionado, criptografado e negando tráfego sem TLS; DynamoDB criptografado; camada Ouro anonimizada (LGPD) |
+
 ---
 
 ## 🛠️ Ficha Técnica
@@ -21,7 +79,7 @@ O **Boca de Lobo** é um MVP de engenharia de software focado em segurança e em
 | Observabilidade | Prometheus + Alertmanager + Grafana locais apontando para o MVP publicado |
 
 Documentação complementar:
-- [Arquitetura, responsabilidade compartilhada, LGPD e custo](docs/arquitetura.md)
+- [Arquitetura, fluxo de dados e segurança](#arquitetura) (nesta página)
 - [Ingestão do mapa: Databricks → S3 → Lambda → DynamoDB](docs/ingestao-dados.md)
 - [Pré-requisitos AWS: role de deploy, OIDC e bucket do state](docs/aws-role.md)
 - [Evidências (pipeline barrada/corrigida, dashboard, alerta)](docs/evidencias.md)
@@ -30,13 +88,13 @@ Documentação complementar:
 ```
 app/                     API FastAPI + Dockerfile + testes          → container no EC2
 lambda/ingestor/         Lambda que valida o JSON e grava no Dynamo → publicada pelo Terraform
-caddy/Caddyfile          Proxy HTTPS (Let's Encrypt)
+proxy/                   Imagem do Caddy (Caddyfile embutido) — proxy HTTPS (Let's Encrypt)
 docker-compose.yml       Stack executada no EC2 (proxy + api)
-terraform/               main.tf (EC2/SG/EIP/ECR) + dados.tf (S3/Lambda/DynamoDB/IAM)
+terraform/               main.tf (EC2/SG/EIP/ECR) + data.tf (S3/Lambda/DynamoDB/IAM)
 .github/workflows/       Pipeline CI/CD única do monorepo
 monitoring/              Prometheus, Alertmanager, Grafana (local)
 scripts/                 publicar_mapa, gen-targets, load, trigger-alert
-docs/                    Arquitetura, ingestão, IAM e evidências
+docs/                    Diagrama de arquitetura (PNG + fonte draw.io)
 ```
 
 ---
