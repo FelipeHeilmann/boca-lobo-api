@@ -12,6 +12,7 @@ O **Boca de Lobo** é um MVP de engenharia de software focado em segurança e em
 | Swagger (OpenAPI) | [98-86-45-71.sslip.io/docs](https://98-86-45-71.sslip.io/docs) | Documentação interativa; permite testar as rotas pelo navegador |
 | Mapa (JSON) | [/api/v1/mapa](https://98-86-45-71.sslip.io/api/v1/mapa) | Retrato atual servido ao frontend |
 | Resumo | [/api/v1/mapa/resumo](https://98-86-45-71.sslip.io/api/v1/mapa/resumo) | Contagem de bocas de lobo por nível de alerta |
+| Limpeza (RPA) | [/api/v1/rpa](https://98-86-45-71.sslip.io/api/v1/rpa) | Última execução do bot RPA e as ordens de serviço |
 | Health check | [/health](https://98-86-45-71.sslip.io/health) | Estado da API e do carregamento do mapa |
 | Métricas | [/metrics](https://98-86-45-71.sslip.io/metrics) | Métricas Prometheus coletadas pelo Grafana |
 
@@ -25,25 +26,42 @@ O **Boca de Lobo** é um MVP de engenharia de software focado em segurança e em
 > Fonte editável do diagrama: [`docs/arquitetura.drawio`](docs/arquitetura.drawio) (draw.io). No desenho, a Lambda aparece com o rótulo do bucket; o nome real do recurso no Terraform é `boca-lobo-lambda-ingestor`.
 
 ### Fluxo de dados
-1. O **Databricks** gera o mapa diário na camada Ouro e envia o arquivo para `s3://boca-lobo-s3-ingestao/entrada/` usando o usuário IAM `boca-lobo-databricks`.
-2. O S3 emite o evento **object created**, que invoca a Lambda `boca-lobo-lambda-ingestor`.
-3. A Lambda valida estrutura, campos obrigatórios, níveis de alerta (`EVITE A AREA`, `ATENCAO`, `NORMAL`), coordenadas dentro da Região Metropolitana de São Paulo, IDs duplicados e tamanho máximo de 5 MB.
-4. **Arquivo válido:** grava o item `mapa_atual` no DynamoDB com escrita condicional (um arquivo mais antigo nunca sobrescreve um mais novo) e move o original para `processado/`. **Arquivo inválido:** vai para `quarentena/` com o motivo nos metadados, e o mapa continua com a última versão boa.
-5. A **API no EC2** lê o DynamoDB a cada 60 s e mantém o mapa em cache na memória. Se o DynamoDB falhar, continua servindo a última versão válida.
-6. O **portal do cidadão** consulta a API por HTTPS e desenha o mapa com as áreas a evitar.
+O bucket de ingestão tem **uma pasta por fluxo**, todas com a mesma estrutura, e cada fluxo tem a sua tabela no DynamoDB:
+
+| Pasta do fluxo | Quem envia (usuário IAM) | Conteúdo | Tabela DynamoDB (item) | Rota da API |
+|---|---|---|---|---|
+| `databricks/` | Databricks (`boca-lobo-databricks`) | `mapa_cidadao.json`, export da camada Ouro | `boca-lobo-dynamo-mapa` (`mapa_atual`) | `/api/v1/mapa` |
+| `rpa/` | Bot RPA (`boca-lobo-rpa`) | resultado do bot: `execucao` + `ordens_servico` | `boca-lobo-dynamo-rpa` (`rpa_atual`) | `/api/v1/rpa` |
+
+```
+s3://boca-lobo-s3-ingestao/
+├── databricks/  entrada/  processado/ (90 dias)  quarentena/ (30 dias)
+└── rpa/         entrada/  processado/ (90 dias)  quarentena/ (30 dias)
+```
+
+1. Cada fluxo grava o arquivo `.json` em `<fluxo>/entrada/`. Cada usuário IAM só pode gravar na `entrada/` do seu fluxo.
+2. O S3 emite o evento **object created** (só para `<fluxo>/entrada/*.json`), que invoca a Lambda `boca-lobo-lambda-ingestor`.
+3. A Lambda descobre o fluxo pela pasta e aplica a validação dele (tamanho máximo de 5 MB, coordenadas dentro da Região Metropolitana de São Paulo e IDs duplicados nos dois):
+   - **databricks:** estrutura, campos obrigatórios e níveis de alerta (`EVITE A AREA`, `ATENCAO`, `NORMAL`);
+   - **rpa:** execução (`id`, `inicio`, `status`, nível `NORMAL`/`ATENCAO`/`ALERTA`, contadores ≥ 0) e ordens de serviço (obstrução e nota de 0 a 100, prioridade `CRITICA`/`ALTA`/`MEDIA`, status `ABERTA`/`AGUARDANDO_REFORCO`). Só a execução e as ordens seguem para o DynamoDB: alertas, contatos mascarados e textos livres do bot ficam de fora (minimização/LGPD).
+4. **Arquivo válido:** grava o item do fluxo na tabela dele com escrita condicional (um arquivo mais antigo nunca sobrescreve um mais novo) e move o original para `<fluxo>/processado/`. **Arquivo inválido:** vai para `<fluxo>/quarentena/` com o motivo nos metadados, e a API continua com a última versão boa.
+5. A **API no EC2** lê as duas tabelas a cada 60 s e mantém o resultado em cache na memória. Se uma leitura falhar, continua servindo a última versão válida daquele fluxo, sem afetar o outro.
+6. O **portal** consulta a API por HTTPS: a aba *Onde não passar* desenha o mapa do cidadão e a aba *Limpeza (RPA)* mostra a última execução do bot e a lista de bocas de lobo para limpar.
 
 ### Componentes
 | Componente (no diagrama) | Serviço | Papel na solução |
 |---|---|---|
 | `data-bricks` | Databricks (fora da AWS) | Executa os notebooks Bronze/Prata/Ouro e gera o `mapa_cidadao.json` com as bocas de lobo e o nível de alerta de cada uma |
-| `boca-lobo-databricks` | IAM User | Identidade técnica do Databricks; só pode gravar (`s3:PutObject`) em `entrada/` |
-| `s3: putObject` | IAM Policy | Política de menor privilégio do usuário acima: não lê, não lista e não apaga nada |
-| `boca-lobo-s3-ingestao` | Amazon S3 | Bucket privado, versionado e criptografado; recebe o export em `entrada/`, guarda o histórico em `processado/` (90 dias) e os recusados em `quarentena/` (30 dias); exige HTTPS |
-| `object created` | Evento S3 | Notificação `s3:ObjectCreated` filtrada por `entrada/*.json`, que dispara a Lambda |
-| Lambda | AWS Lambda | `boca-lobo-lambda-ingestor` (Python 3.12, arm64, 256 MB): valida o JSON, publica no DynamoDB e move o arquivo |
-| `boca-lobo-dynamo-mapa` | Amazon DynamoDB | Tabela provisionada (5 RCU / 12 WCU) com um único item `mapa_atual` contendo os pontos compactados em gzip (~11 KB) |
+| `boca-lobo-databricks` | IAM User | Identidade técnica do Databricks; só pode gravar (`s3:PutObject`) em `databricks/entrada/` |
+| `s3: putObject` | IAM Policy | Política de menor privilégio dos usuários técnicos: não leem, não listam e não apagam nada |
+| `boca-lobo-rpa` | IAM User | Identidade técnica do bot RPA; só pode gravar (`s3:PutObject`) em `rpa/entrada/` |
+| `boca-lobo-s3-ingestao` | Amazon S3 | Bucket privado, versionado e criptografado, com uma pasta por fluxo (`databricks/`, `rpa/`); cada uma recebe em `entrada/`, guarda o histórico em `processado/` (90 dias) e os recusados em `quarentena/` (30 dias); exige HTTPS |
+| `object created` | Evento S3 | Notificação `s3:ObjectCreated` filtrada por `databricks/entrada/*.json` e `rpa/entrada/*.json`, que dispara a Lambda |
+| Lambda | AWS Lambda | `boca-lobo-lambda-ingestor` (Python 3.12, arm64, 256 MB): identifica o fluxo pela pasta, valida o JSON, publica na tabela do fluxo e move o arquivo |
+| `boca-lobo-dynamo-mapa` | Amazon DynamoDB | Fluxo databricks. Tabela provisionada (5 RCU / 12 WCU) com um único item `mapa_atual` contendo os pontos compactados em gzip (~11 KB) |
+| `boca-lobo-dynamo-rpa` | Amazon DynamoDB | Fluxo rpa. Tabela provisionada (5 RCU / 5 WCU) com um único item `rpa_atual`: última execução do bot e ordens de serviço compactadas em gzip (~2 KB). Somadas, as duas tabelas ficam no Always Free (10 RCU / 17 WCU de 25) |
 | `CitizenTech-BocaDeLobo-MVP` | Amazon EC2 | `t3.micro` (Ubuntu 24.04) com Elastic IP, executando os containers Caddy e API; lê o DynamoDB com a IAM Role da instância |
-| `portal` | Frontend web | Mapa do cidadão (GitHub Pages) que consome a API via HTTPS |
+| `portal` | Frontend web | MVP (GitHub Pages) que consome a API via HTTPS: mapa do cidadão e aba de limpeza do bot RPA |
 
 Recursos de apoio que não aparecem no diagrama: repositórios **ECR** (imagens da API e do proxy, com scan na publicação e retenção das 5 últimas), **CloudWatch Logs** e o alarme `boca-lobo-lambda-ingestor-erros`, **X-Ray** na Lambda, **AWS Systems Manager** (deploy e administração sem SSH) e o bucket do Terraform state.
 
@@ -60,7 +78,7 @@ Recursos de apoio que não aparecem no diagrama: repositórios **ECR** (imagens 
 | Rede | Security Group só com 443 (HTTPS) e 80 (ACME e redirect); a API só é acessível pelo proxy; nenhuma porta admin aberta (administração via SSM) |
 | Instância | IMDSv2 obrigatório, EBS criptografado, `unattended-upgrades` |
 | HTTP | HSTS, `X-Content-Type-Options`, `Referrer-Policy`; CORS só para a origem do frontend e só `GET` |
-| Identidade | Menor privilégio por identidade (EC2 só `GetItem`, Lambda só o necessário, Databricks só `PutObject` em `entrada/`); pipeline via GitHub OIDC, sem access keys |
+| Identidade | Menor privilégio por identidade (EC2 só `GetItem`, Lambda só o necessário, Databricks só `PutObject` em `databricks/entrada/`, bot RPA só `PutObject` em `rpa/entrada/`); pipeline via GitHub OIDC, sem access keys |
 | Dados | S3 privado, versionado, criptografado e negando tráfego sem TLS; DynamoDB criptografado; camada Ouro anonimizada (LGPD) |
 
 ---
@@ -165,6 +183,18 @@ curl -s https://$(terraform -chdir=terraform output -raw site_host)/api/v1/mapa/
 ```
 Depois disso, o Databricks passa a enviar o export diário (ver [docs/ingestao-dados.md](docs/ingestao-dados.md)).
 
+### 4.2 Credencial do bot RPA
+O Terraform cria o usuário `boca-lobo-rpa`, mas **não** a access key (o segredo ficaria no state). Gere pela CLI e cadastre direto nos GitHub Secrets do repositório do bot:
+```bash
+aws iam create-access-key --user-name boca-lobo-rpa --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text
+```
+| Secret (repo do bot) | Valor |
+|---|---|
+| `RPA_AWS_ACCESS_KEY_ID` | Access key ID gerada acima |
+| `RPA_AWS_SECRET_ACCESS_KEY` | Secret access key gerada acima |
+
+O bot grava o resultado em `s3://boca-lobo-s3-ingestao/rpa/entrada/<nome>.json` (um arquivo por execução, com `execucao` e `ordens_servico` na raiz). A Lambda publica em até alguns segundos e a API passa a servir em `/api/v1/rpa` em até 60 s.
+
 ### 5. Observabilidade local (Prometheus + Grafana)
 ```bash
 cp monitoring/.env.example monitoring/.env     # defina a senha do Grafana
@@ -204,8 +234,10 @@ A role de deploy, o OIDC provider e o bucket do state não são gerenciados pelo
 ## 🔐 Endpoints
 | Rota | Descrição |
 |---|---|
-| `GET /health` | Health check (`mapa_carregado`) |
+| `GET /health` | Health check (`mapa_carregado`, `rpa_carregado`) |
 | `GET /api/v1/mapa` | Retrato atual do mapa do cidadão (mesmo formato do export da Ouro) |
 | `GET /api/v1/mapa/resumo` | Contagem de bocas de lobo por nível de alerta |
+| `GET /api/v1/rpa` | Última execução do bot RPA (nível e chuva prevista, contadores, status) e as ordens de serviço, da mais urgente para a menos urgente |
+| `GET /api/v1/rpa/resumo` | Ordens de serviço por prioridade e por status, com o nível de chuva da execução |
 | `GET /metrics` | Métricas Prometheus |
 | `GET /docs` | OpenAPI/Swagger |

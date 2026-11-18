@@ -13,7 +13,9 @@ set -euo pipefail
 ARQUIVO="${1:?informe o caminho do mapa_cidadao.json}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUCKET="${2:-$(terraform -chdir="$ROOT/terraform" output -raw ingestao_bucket)}"
-CHAVE="entrada/mapa_cidadao_$(date -u +%Y%m%dT%H%M%SZ).json"
+FLUXO="databricks"
+NOME="mapa_cidadao_$(date -u +%Y%m%dT%H%M%SZ).json"
+CHAVE="${FLUXO}/entrada/${NOME}"
 
 python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(f\"{len(d['pontos'])} pontos, gerado_em={d['gerado_em']}\")" "$ARQUIVO"
 
@@ -23,16 +25,16 @@ echo "Enviado para s3://${BUCKET}/${CHAVE}"
 echo "Aguardando a Lambda processar..."
 for _ in $(seq 1 20); do
   sleep 3
-  if aws s3api head-object --bucket "$BUCKET" --key "processado/${CHAVE#entrada/}" > /dev/null 2>&1; then
-    status=$(aws s3api head-object --bucket "$BUCKET" --key "processado/${CHAVE#entrada/}" --query 'Metadata.status' --output text)
+  if aws s3api head-object --bucket "$BUCKET" --key "${FLUXO}/processado/${NOME}" > /dev/null 2>&1; then
+    status=$(aws s3api head-object --bucket "$BUCKET" --key "${FLUXO}/processado/${NOME}" --query 'Metadata.status' --output text)
     case "$status" in
-      publicado) echo "OK: publicado (processado/${CHAVE#entrada/})"; exit 0 ;;
+      publicado) echo "OK: publicado (${FLUXO}/processado/${NOME})"; exit 0 ;;
       ignorado_mais_antigo) echo "IGNORADO: o mapa no ar é mais recente que este arquivo (gerado_em mais antigo)"; exit 2 ;;
       *) echo "Processado (status: ${status})"; exit 0 ;;
     esac
   fi
-  if aws s3api head-object --bucket "$BUCKET" --key "quarentena/${CHAVE#entrada/}" > /dev/null 2>&1; then
-    motivo=$(aws s3api head-object --bucket "$BUCKET" --key "quarentena/${CHAVE#entrada/}" --query 'Metadata.motivo' --output text)
+  if aws s3api head-object --bucket "$BUCKET" --key "${FLUXO}/quarentena/${NOME}" > /dev/null 2>&1; then
+    motivo=$(aws s3api head-object --bucket "$BUCKET" --key "${FLUXO}/quarentena/${NOME}" --query 'Metadata.motivo' --output text)
     echo "REJEITADO: ${motivo}"; exit 1
   fi
 done

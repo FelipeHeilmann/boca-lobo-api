@@ -1,10 +1,12 @@
 """
 API do MVP Boca de Lobo.
 
-Serve ao frontend (mapa do cidadão) o retrato mais recente da camada Ouro, publicado no DynamoDB pela
-Lambda "ingestor". A leitura usa cache em memória (padrão 60 s) atualizado em segundo plano: o DynamoDB é
-consultado ~1x por minuto independentemente do tráfego, e se ele falhar a API continua servindo a última
-versão válida.
+Serve ao frontend os dados publicados no DynamoDB pela Lambda "ingestor", um fluxo por tabela:
+  - fluxo databricks -> /api/v1/mapa : retrato mais recente da camada Ouro (mapa do cidadão)
+  - fluxo rpa        -> /api/v1/rpa  : última execução do bot RPA e a lista de bocas de lobo para limpar
+A leitura usa cache em memória (padrão 60 s) atualizado em segundo plano: o DynamoDB é consultado ~1x por
+minuto independentemente do tráfego, e se ele falhar a API continua servindo a última versão válida de cada
+fluxo (a falha de um fluxo não afeta o outro).
 """
 import asyncio
 import gzip
@@ -24,6 +26,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(
 logger = logging.getLogger("citizen-tech-api")
 
 TABELA = os.getenv("DYNAMODB_TABLE", "boca-lobo-dynamo-mapa")
+TABELA_RPA = os.getenv("DYNAMODB_TABLE_RPA", "boca-lobo-dynamo-rpa")
 REGIAO = os.getenv("AWS_REGION", "us-east-1")
 CACHE_TTL = int(os.getenv("CACHE_TTL_SECONDS", "60"))
 CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
@@ -36,6 +39,8 @@ CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o
 #   Saturação  -> http_requests_in_progress + process_* (CPU/memória, coletor padrão)
 # Dados do mapa (frescor do pipeline de dados)
 #   mapa_gerado_em_timestamp_seconds, mapa_total_pontos, mapa_leitura_falhas_total
+# Dados do bot RPA
+#   rpa_execucao_inicio_timestamp_seconds, rpa_total_ordens, rpa_leitura_falhas_total
 # ---------------------------------------------------------------------------
 REQUEST_COUNT = Counter("http_requests_total", "Total HTTP Requests", ["method", "endpoint", "http_status"])
 REQUEST_LATENCY = Histogram(
@@ -48,9 +53,15 @@ IN_PROGRESS = Gauge("http_requests_in_progress", "Requisições HTTP em processa
 MAPA_GERADO_EM = Gauge("mapa_gerado_em_timestamp_seconds", "Momento (epoch) em que a camada Ouro gerou o mapa servido")
 MAPA_TOTAL_PONTOS = Gauge("mapa_total_pontos", "Quantidade de bocas de lobo no mapa servido")
 MAPA_FALHAS = Counter("mapa_leitura_falhas_total", "Falhas ao ler o mapa do DynamoDB")
+RPA_INICIO = Gauge("rpa_execucao_inicio_timestamp_seconds", "Momento (epoch) em que começou a execução do bot RPA servida")
+RPA_TOTAL_ORDENS = Gauge("rpa_total_ordens", "Quantidade de ordens de serviço na execução do bot RPA servida")
+RPA_FALHAS = Counter("rpa_leitura_falhas_total", "Falhas ao ler o resultado do bot RPA do DynamoDB")
+
+PRIORIDADES = ("CRITICA", "ALTA", "MEDIA")
+STATUS_ORDEM = ("ABERTA", "AGUARDANDO_REFORCO")
 
 _dynamo = None
-_cache: dict = {"mapa": None, "lido_em": 0.0}
+_cache: dict = {"mapa": None, "rpa": None, "lido_em": 0.0}
 
 
 def dynamo():
@@ -86,15 +97,38 @@ def ler_mapa_dynamo() -> dict | None:
     return mapa
 
 
+def ler_rpa_dynamo() -> dict | None:
+    resp = dynamo().get_item(TableName=TABELA_RPA, Key={"pk": {"S": "rpa_atual"}})
+    item = resp.get("Item")
+    if not item:
+        return None
+    dados = json.loads(gzip.decompress(item["dados_gz"]["B"]))
+    rpa = {
+        "execucao": dados["execucao"],
+        "ordens_servico": dados["ordens_servico"],
+        "publicado_em": item.get("processado_em", {}).get("S"),
+    }
+    RPA_INICIO.set(_epoch(item["inicio_utc"]["S"]))
+    RPA_TOTAL_ORDENS.set(len(rpa["ordens_servico"]))
+    return rpa
+
+
 def atualizar_cache() -> None:
     try:
         mapa = ler_mapa_dynamo()
         if mapa is not None:
             _cache["mapa"] = mapa
-        _cache["lido_em"] = time.time()
     except Exception as exc:  # mantém a última versão válida
         MAPA_FALHAS.inc()
         logger.error("Falha ao ler o mapa do DynamoDB (%s): %s", TABELA, exc)
+    try:
+        rpa = ler_rpa_dynamo()
+        if rpa is not None:
+            _cache["rpa"] = rpa
+    except Exception as exc:  # mantém a última versão válida
+        RPA_FALHAS.inc()
+        logger.error("Falha ao ler o resultado do RPA do DynamoDB (%s): %s", TABELA_RPA, exc)
+    _cache["lido_em"] = time.time()
 
 
 async def _loop_cache() -> None:
@@ -113,7 +147,8 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="CitizenTech - Boca de Lobo API",
     version="3.0.0",
-    description="Serve ao mapa do cidadão o retrato mais recente das bocas de lobo em risco (camada Ouro).",
+    description="Serve ao MVP o mapa das bocas de lobo em risco (camada Ouro, Databricks) e a lista de limpeza "
+    "priorizada pelo bot RPA.",
     lifespan=lifespan,
 )
 
@@ -151,6 +186,7 @@ def health_check():
         "service": "CitizenTech Core API",
         "environment": os.getenv("ENVIRONMENT", "production"),
         "mapa_carregado": _cache["mapa"] is not None,
+        "rpa_carregado": _cache["rpa"] is not None,
     }
 
 
@@ -173,6 +209,39 @@ def resumo():
     for p in m["pontos"]:
         contagem[p.get("nivel_alerta")] = contagem.get(p.get("nivel_alerta"), 0) + 1
     return {"gerado_em": m["gerado_em"], "total_pontos": len(m["pontos"]), "por_nivel": contagem}
+
+
+def _rpa_ou_503() -> dict:
+    if _cache["rpa"] is None:
+        raise HTTPException(status_code=503, detail="Resultado do bot RPA ainda não disponível.")
+    return _cache["rpa"]
+
+
+@app.get("/api/v1/rpa")
+def rpa(response: Response):
+    """Última execução do bot RPA (chuva prevista, nível, contadores) e as ordens de serviço, da mais urgente
+    para a menos urgente."""
+    dados = _rpa_ou_503()
+    response.headers["Cache-Control"] = f"public, max-age={CACHE_TTL}"
+    return dados
+
+
+@app.get("/api/v1/rpa/resumo")
+def rpa_resumo():
+    """Contagem das ordens de serviço por prioridade e por status, com o nível de chuva da execução."""
+    dados = _rpa_ou_503()
+    ex, ordens = dados["execucao"], dados["ordens_servico"]
+    por_prioridade = {p: 0 for p in PRIORIDADES}
+    por_status = {s: 0 for s in STATUS_ORDEM}
+    for o in ordens:
+        por_prioridade[o.get("prioridade")] = por_prioridade.get(o.get("prioridade"), 0) + 1
+        por_status[o.get("status")] = por_status.get(o.get("status"), 0) + 1
+    return {
+        "execucao_id": ex.get("id"), "inicio": ex.get("inicio"), "status": ex.get("status"),
+        "nivel": ex.get("nivel"), "chuva_24h_mm": ex.get("chuva_24h_mm"), "total_ordens": len(ordens),
+        "por_prioridade": por_prioridade, "por_status": por_status,
+        "reinspecionar": sum(1 for o in ordens if o.get("reinspecionar")),
+    }
 
 
 @app.get("/metrics")

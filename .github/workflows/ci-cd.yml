@@ -137,6 +137,7 @@ jobs:
       proxy_ecr_repository_url: ${{ steps.out.outputs.proxy_ecr_repository_url }}
       site_host: ${{ steps.out.outputs.site_host }}
       dynamodb_table: ${{ steps.out.outputs.dynamodb_table }}
+      dynamodb_table_rpa: ${{ steps.out.outputs.dynamodb_table_rpa }}
     defaults:
       run:
         working-directory: terraform
@@ -166,6 +167,7 @@ jobs:
             echo "proxy_ecr_repository_url=$(terraform output -raw proxy_ecr_repository_url)"
             echo "site_host=$(terraform output -raw site_host)"
             echo "dynamodb_table=$(terraform output -raw dynamodb_table)"
+            echo "dynamodb_table_rpa=$(terraform output -raw dynamodb_table_rpa)"
           } >> "$GITHUB_OUTPUT"
 
   # ----------------------------------------------------- DEPLOY (ECR + SSM)
@@ -188,6 +190,7 @@ jobs:
       PROXY_ECR_URL: ${{ needs.infra.outputs.proxy_ecr_repository_url }}
       SITE_HOST: ${{ needs.infra.outputs.site_host }}
       DYNAMODB_TABLE: ${{ needs.infra.outputs.dynamodb_table }}
+      DYNAMODB_TABLE_RPA: ${{ needs.infra.outputs.dynamodb_table_rpa }}
       CORS_ORIGINS: ${{ vars.CORS_ORIGINS || 'https://felipevoidela.github.io' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -223,8 +226,8 @@ jobs:
         run: |
           REGISTRY="${ECR_URL%%/*}"
           BUNDLE_B64=$(tar czf - docker-compose.yml | base64 -w0)
-          ENV_B64=$(printf 'IMAGE_URI=%s\nPROXY_IMAGE_URI=%s\nSITE_HOST=%s\nDYNAMODB_TABLE=%s\nAWS_REGION=%s\nCORS_ORIGINS=%s\n' \
-            "$ECR_URL:$GITHUB_SHA" "$PROXY_ECR_URL:$GITHUB_SHA" "$SITE_HOST" "$DYNAMODB_TABLE" "$AWS_REGION" "$CORS_ORIGINS" | base64 -w0)
+          ENV_B64=$(printf 'IMAGE_URI=%s\nPROXY_IMAGE_URI=%s\nSITE_HOST=%s\nDYNAMODB_TABLE=%s\nDYNAMODB_TABLE_RPA=%s\nAWS_REGION=%s\nCORS_ORIGINS=%s\n' \
+            "$ECR_URL:$GITHUB_SHA" "$PROXY_ECR_URL:$GITHUB_SHA" "$SITE_HOST" "$DYNAMODB_TABLE" "$DYNAMODB_TABLE_RPA" "$AWS_REGION" "$CORS_ORIGINS" | base64 -w0)
           jq -n \
             --arg bundle "$BUNDLE_B64" \
             --arg env "$ENV_B64" \

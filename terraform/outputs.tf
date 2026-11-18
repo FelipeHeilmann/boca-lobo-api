@@ -34,18 +34,28 @@ output "url_metrics" {
 }
 
 output "dynamodb_table" {
-  description = "Tabela DynamoDB lida pela API"
+  description = "Tabela DynamoDB do fluxo databricks (mapa) lida pela API"
   value       = aws_dynamodb_table.mapa.name
 }
 
+output "dynamodb_table_rpa" {
+  description = "Tabela DynamoDB do fluxo rpa (última execução e ordens de serviço) lida pela API"
+  value       = aws_dynamodb_table.rpa.name
+}
+
 output "ingestao_bucket" {
-  description = "Bucket que recebe o export da camada Ouro (prefixo entrada/)"
+  description = "Bucket de ingestão: uma pasta por fluxo (databricks/, rpa/), cada uma com entrada/, processado/ e quarentena/"
   value       = aws_s3_bucket.ingestao.bucket
 }
 
 output "databricks_user" {
-  description = "Usuário IAM (somente PutObject em entrada/) para o Databricks"
+  description = "Usuário IAM (somente PutObject em databricks/entrada/) para o Databricks"
   value       = aws_iam_user.databricks.name
+}
+
+output "rpa_user" {
+  description = "Usuário IAM (somente PutObject em rpa/entrada/) para o bot RPA"
+  value       = aws_iam_user.rpa.name
 }
 
 locals {
