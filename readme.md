@@ -5,15 +5,29 @@
 ## 🎯 Objetivo do Projeto
 O **Boca de Lobo** é um MVP de engenharia de software focado em segurança e emergências urbanas (enchentes). Antes de cada temporal, o sistema cruza o status de obstrução de bueiros/sarjetas com previsões meteorológicas para disparar ações preventivas para a equipe de limpeza e alertas de rota segura para moradores de regiões de risco.
 
+## 📋 Ficha do produto
+| Campo | Resposta |
+|---|---|
+| Nome do produto | Boca de Lobo |
+| Cidadão e território | Morador de bairro que alaga todo verão, principalmente em áreas baixas e periféricas de São Paulo (piloto na zona leste) |
+| Problema, em uma frase | Bueiro entupido + chuva forte = rua alagada, carro perdido e casa invadida, e ninguém avisa antes |
+| Proposta de valor | Saber antes da chuva quais bueiros estão entupidos em área de risco: a equipe de limpeza recebe a rota priorizada, e o morador sabe onde não passar e o que fazer |
+| Arquitetura: componentes | Robô de inspeção (Maker Lab) · YOLO + graduador de obstrução (Visão) · assistente com RAG e agente (GenAI) · pipeline Airflow → Databricks Bronze/Prata/Ouro (Big Data) · bot de alertas (RPA) · deploy na AWS com observabilidade (DevOps) · modelo de negócio (BI) · mapa público do cidadão (MVP) |
+| Fontes de dados | Open-Meteo (previsão de chuva) · Cemaden (pluviômetros) · GeoSampa (áreas de risco) · SP156 (pedidos de drenagem) · inspeções do robô (simuladas) · 22 fontes oficiais da Defesa Civil, Ministério da Saúde e Prefeitura (base do assistente) |
+| Modelos de IA utilizados | Visão: YOLOv8n (`yolov8n-bocadelobo-v2`) + graduador sobre CLIP ViT-B/32 e DINOv2 ViT-S/14 · GenAI: LLM `gemma3:4b` + embeddings `bge-m3`, locais (Ollama) · Robô: classificador embarcado livre/atenção/crítico (ultrassom) |
+| URL do MVP e repositório | MVP: [Boca de Lobo · Onde não passar hoje](https://felipevoidela.github.io/GS2-2026-Big-Data-Architecture/) · Repositório: [FelipeVoidela/GS2-2026-Big-Data-Architecture](https://github.com/FelipeVoidela/GS2-2026-Big-Data-Architecture) |
+| Indicadores de impacto | Pontos críticos em área de risco com chuva prevista · moradias e pessoas nessas áreas · tempo de espera no SP156. No export de 08/11/2026: 259 bocas de lobo no mapa, 12 em “Evite a área”, 905 moradias e 2.525 pessoas em área de risco com bueiro crítico |
+| ODS conectados | 11 (cidades resilientes, meta 11.5) · 13 (adaptação ao clima, meta 13.1) · 3 (saúde, doenças de veiculação hídrica, meta 3.3) |
+
 ## 🔗 Acesse a aplicação
 | Acesso | Link | O que é |
 |---|---|---|
-| Mapa do cidadão | [felipevoidela.github.io/GS2-2026-Big-Data-Architecture](https://felipevoidela.github.io/GS2-2026-Big-Data-Architecture/) | Frontend que consome a API e mostra onde não passar hoje |
+| Portal (MVP) | [felipevoidela.github.io/GS2-2026-Big-Data-Architecture](https://felipevoidela.github.io/GS2-2026-Big-Data-Architecture/) | Frontend que consome a API: aba *Onde não passar* (mapa do cidadão) e aba *Limpeza (RPA)* |
 | Swagger (OpenAPI) | [98-86-45-71.sslip.io/docs](https://98-86-45-71.sslip.io/docs) | Documentação interativa; permite testar as rotas pelo navegador |
 | Mapa (JSON) | [/api/v1/mapa](https://98-86-45-71.sslip.io/api/v1/mapa) | Retrato atual servido ao frontend |
 | Resumo | [/api/v1/mapa/resumo](https://98-86-45-71.sslip.io/api/v1/mapa/resumo) | Contagem de bocas de lobo por nível de alerta |
 | Limpeza (RPA) | [/api/v1/rpa](https://98-86-45-71.sslip.io/api/v1/rpa) | Última execução do bot RPA e as ordens de serviço |
-| Health check | [/health](https://98-86-45-71.sslip.io/health) | Estado da API e do carregamento do mapa |
+| Health check | [/health](https://98-86-45-71.sslip.io/health) | Estado da API e do carregamento do mapa e do resultado do RPA |
 | Métricas | [/metrics](https://98-86-45-71.sslip.io/metrics) | Métricas Prometheus coletadas pelo Grafana |
 
 ---
@@ -23,7 +37,9 @@ O **Boca de Lobo** é um MVP de engenharia de software focado em segurança e em
 
 ![Diagrama de arquitetura na AWS](docs/arquitetura.png)
 
-> Fonte editável do diagrama: [`docs/arquitetura.drawio`](docs/arquitetura.drawio) (draw.io). No desenho, a Lambda aparece com o rótulo do bucket; o nome real do recurso no Terraform é `boca-lobo-lambda-ingestor`.
+> Fonte editável do diagrama: [`docs/arquitetura.drawio`](docs/arquitetura.drawio) (draw.io). No desenho, a Lambda aparece com o rótulo do bucket; o nome real do recurso no Terraform é `boca-lobo-lambda-ingestor`. Os dois usuários IAM (`boca-lobo-databricks` e `boca-lobo-rpa`) e as duas tabelas (`boca-lobo-dynamo-mapa` e `boca-lobo-dynamo-rpa`) aparecem num mesmo ícone cada.
+>
+> Detalhes de cada fluxo (formato dos arquivos, validação, tabelas, rotas e como conferir uma execução): [docs/ingestao-dados.md](docs/ingestao-dados.md).
 
 ### Fluxo de dados
 O bucket de ingestão tem **uma pasta por fluxo**, todas com a mesma estrutura, e cada fluxo tem a sua tabela no DynamoDB:
@@ -48,18 +64,31 @@ s3://boca-lobo-s3-ingestao/
 5. A **API no EC2** lê as duas tabelas a cada 60 s e mantém o resultado em cache na memória. Se uma leitura falhar, continua servindo a última versão válida daquele fluxo, sem afetar o outro.
 6. O **portal** consulta a API por HTTPS: a aba *Onde não passar* desenha o mapa do cidadão e a aba *Limpeza (RPA)* mostra a última execução do bot e a lista de bocas de lobo para limpar.
 
+#### Fluxo do RPA
+O **`RPA python worker`** é o bot de prevenção de alagamentos. Todo dia às 06:00 ele consulta a previsão de chuva, decide o nível de risco (`NORMAL`/`ATENCAO`/`ALERTA`), lê as inspeções do robô, prioriza as bocas de lobo e distribui as ordens de serviço entre as equipes de limpeza. O resultado de cada execução chega ao portal assim:
+
+```
+RPA python worker ──PutObject (boca-lobo-rpa)──► s3 rpa/entrada/bocaLobo_<data>_<hora>.json
+   ──object created──► Lambda (valida) ──► DynamoDB boca-lobo-dynamo-rpa (item rpa_atual) ──► rpa/processado/
+   ──► API no EC2 (cache 60 s): GET /api/v1/rpa ──► portal, aba "Limpeza (RPA)"
+```
+
+- **O que o bot envia:** um JSON por execução com `execucao` (início e fim, nível e chuva prevista em 24 h, pico e probabilidade, fonte da previsão, inspeções lidas/válidas/rejeitadas/duplicadas, ordens e alertas, status final) e `ordens_servico` (código do bueiro, endereço e área, coordenadas, % de obstrução e tipo de lixo, nota de 0 a 100 e prioridade, equipe e status, se precisa reinspecionar).
+- **O que a Lambda faz:** recusa o arquivo inteiro se faltar campo obrigatório ou se algum valor estiver fora do domínio (prioridade, status, nível, notas de 0 a 100, coordenadas fora de SP, bueiro repetido). Nesse caso ele vai para `rpa/quarentena/` com o motivo. Arquivo válido substitui o item `rpa_atual` só se a execução for igual ou mais nova que a publicada.
+- **LGPD:** só a execução e as ordens de serviço vão para o DynamoDB e para a API. Alertas, contatos mascarados de moradores e textos livres do bot ficam de fora.
+- **Credencial:** o bot usa o usuário `boca-lobo-rpa`, que só pode `PutObject` em `rpa/entrada/*`. A access key fica nos segredos do bot, nunca no código nem no Terraform state.
+
 ### Componentes
 | Componente (no diagrama) | Serviço | Papel na solução |
 |---|---|---|
 | `data-bricks` | Databricks (fora da AWS) | Executa os notebooks Bronze/Prata/Ouro e gera o `mapa_cidadao.json` com as bocas de lobo e o nível de alerta de cada uma |
-| `boca-lobo-databricks` | IAM User | Identidade técnica do Databricks; só pode gravar (`s3:PutObject`) em `databricks/entrada/` |
+| `RPA python worker` | Bot RPA em Python (fora da AWS) | Roda todo dia às 06:00: previsão de chuva, decisão do nível de risco, priorização das bocas de lobo e ordens de serviço para as equipes; envia o resultado de cada execução para `rpa/entrada/` |
+| `boca-lobo-databricks` / `boca-lobo-rpa` | IAM Users | Uma identidade técnica por fluxo: o Databricks só pode gravar (`s3:PutObject`) em `databricks/entrada/`, e o bot RPA só em `rpa/entrada/` |
 | `s3: putObject` | IAM Policy | Política de menor privilégio dos usuários técnicos: não leem, não listam e não apagam nada |
-| `boca-lobo-rpa` | IAM User | Identidade técnica do bot RPA; só pode gravar (`s3:PutObject`) em `rpa/entrada/` |
 | `boca-lobo-s3-ingestao` | Amazon S3 | Bucket privado, versionado e criptografado, com uma pasta por fluxo (`databricks/`, `rpa/`); cada uma recebe em `entrada/`, guarda o histórico em `processado/` (90 dias) e os recusados em `quarentena/` (30 dias); exige HTTPS |
 | `object created` | Evento S3 | Notificação `s3:ObjectCreated` filtrada por `databricks/entrada/*.json` e `rpa/entrada/*.json`, que dispara a Lambda |
 | Lambda | AWS Lambda | `boca-lobo-lambda-ingestor` (Python 3.12, arm64, 256 MB): identifica o fluxo pela pasta, valida o JSON, publica na tabela do fluxo e move o arquivo |
-| `boca-lobo-dynamo-mapa` | Amazon DynamoDB | Fluxo databricks. Tabela provisionada (5 RCU / 12 WCU) com um único item `mapa_atual` contendo os pontos compactados em gzip (~11 KB) |
-| `boca-lobo-dynamo-rpa` | Amazon DynamoDB | Fluxo rpa. Tabela provisionada (5 RCU / 5 WCU) com um único item `rpa_atual`: última execução do bot e ordens de serviço compactadas em gzip (~2 KB). Somadas, as duas tabelas ficam no Always Free (10 RCU / 17 WCU de 25) |
+| `boca-lobo-dynamo-mapa` / `boca-lobo-dynamo-rpa` | Amazon DynamoDB | Uma tabela por fluxo, provisionadas e criptografadas, cada uma com um único item compactado em gzip: **mapa** (5 RCU / 12 WCU, item `mapa_atual` com os pontos do mapa, ~11 KB) e **rpa** (5 RCU / 5 WCU, item `rpa_atual` com a última execução do bot e as ordens de serviço, ~2 KB). Somadas, ficam no Always Free (10 RCU / 17 WCU de 25) |
 | `CitizenTech-BocaDeLobo-MVP` | Amazon EC2 | `t3.micro` (Ubuntu 24.04) com Elastic IP, executando os containers Caddy e API; lê o DynamoDB com a IAM Role da instância |
 | `portal` | Frontend web | MVP (GitHub Pages) que consome a API via HTTPS: mapa do cidadão e aba de limpeza do bot RPA |
 
@@ -67,7 +96,8 @@ Recursos de apoio que não aparecem no diagrama: repositórios **ECR** (imagens 
 
 ### Decisões de arquitetura
 - **Cache com atualização em segundo plano:** o DynamoDB recebe cerca de uma leitura por minuto, independentemente do número de visitantes, o que mantém a tabela no Always Free mesmo em picos de acesso durante uma tempestade.
-- **DynamoDB provisionado em vez de on-demand:** 5 RCU e 12 WCU ficam abaixo do limite gratuito permanente de 25 RCU/25 WCU por conta.
+- **DynamoDB provisionado em vez de on-demand:** somadas, as duas tabelas usam 10 RCU e 17 WCU (mapa 5/12, rpa 5/5), abaixo do limite gratuito permanente de 25 RCU/25 WCU por conta.
+- **Uma pasta, um usuário e uma tabela por fluxo:** Databricks e RPA têm a mesma estrutura no bucket (`entrada/`, `processado/`, `quarentena/`) e a mesma Lambda, mas cada um só consegue gravar na sua pasta e publica na sua tabela. Um novo fluxo entra com uma pasta, um usuário, uma tabela e uma função de validação.
 - **Validação na entrada:** dados quebrados vindos do pipeline não chegam ao cidadão; ficam isolados em quarentena para análise.
 - **HTTPS sem domínio próprio:** o sslip.io resolve `98-86-45-71.sslip.io` para o Elastic IP, e o Caddy emite o certificado Let's Encrypt automaticamente.
 
@@ -79,15 +109,15 @@ Recursos de apoio que não aparecem no diagrama: repositórios **ECR** (imagens 
 | Instância | IMDSv2 obrigatório, EBS criptografado, `unattended-upgrades` |
 | HTTP | HSTS, `X-Content-Type-Options`, `Referrer-Policy`; CORS só para a origem do frontend e só `GET` |
 | Identidade | Menor privilégio por identidade (EC2 só `GetItem`, Lambda só o necessário, Databricks só `PutObject` em `databricks/entrada/`, bot RPA só `PutObject` em `rpa/entrada/`); pipeline via GitHub OIDC, sem access keys |
-| Dados | S3 privado, versionado, criptografado e negando tráfego sem TLS; DynamoDB criptografado; camada Ouro anonimizada (LGPD) |
+| Dados | S3 privado, versionado, criptografado e negando tráfego sem TLS; DynamoDB criptografado; camada Ouro anonimizada e, do RPA, só execução e ordens de serviço (LGPD) |
 
 ---
 
 ## 🛠️ Ficha Técnica
 | Tema | Implementação |
 |---|---|
-| Aplicação | API FastAPI (Python 3.11) que serve ao mapa do cidadão o retrato da camada Ouro lido do DynamoDB, com métricas Prometheus (4 sinais de ouro) |
-| Ingestão de dados | Databricks envia o export para o S3 → Lambda valida → DynamoDB (Always Free) |
+| Aplicação | API FastAPI (Python 3.11) que serve ao portal o retrato da camada Ouro e o resultado do bot RPA lidos do DynamoDB, com métricas Prometheus (4 sinais de ouro) |
+| Ingestão de dados | Databricks e bot RPA enviam para a pasta do seu fluxo no S3 → Lambda valida → tabela DynamoDB do fluxo (Always Free) |
 | Container | Multi-stage, usuário não-root (uid 10001), sem segredos, `read_only`, `cap_drop: ALL` |
 | Execução | Docker Compose no EC2 (`docker-compose.yml`): Caddy (HTTPS Let's Encrypt via sslip.io) + API |
 | Nuvem (IaC) | Terraform na AWS: EC2 + SG + EIP + ECR + S3 + Lambda + DynamoDB + IAM; state remoto em S3 com lock |
@@ -98,21 +128,21 @@ Recursos de apoio que não aparecem no diagrama: repositórios **ECR** (imagens 
 
 Documentação complementar:
 - [Arquitetura, fluxo de dados e segurança](#arquitetura) (nesta página)
-- [Ingestão do mapa: Databricks → S3 → Lambda → DynamoDB](docs/ingestao-dados.md)
+- [Ingestão de dados: Databricks e RPA → S3 → Lambda → DynamoDB → API](docs/ingestao-dados.md)
 - [Pré-requisitos AWS: role de deploy, OIDC e bucket do state](docs/aws-role.md)
 - [Evidências (pipeline barrada/corrigida, dashboard, alerta)](docs/evidencias.md)
 
 ### Estrutura
 ```
 app/                     API FastAPI + Dockerfile + testes          → container no EC2
-lambda/ingestor/         Lambda que valida o JSON e grava no Dynamo → publicada pelo Terraform
+lambda/ingestor/         Lambda que valida o JSON de cada fluxo e grava na tabela dele → publicada pelo Terraform
 proxy/                   Imagem do Caddy (Caddyfile embutido) — proxy HTTPS (Let's Encrypt)
 docker-compose.yml       Stack executada no EC2 (proxy + api)
 terraform/               main.tf (EC2/SG/EIP/ECR) + data.tf (S3/Lambda/DynamoDB/IAM)
 .github/workflows/       Pipeline CI/CD única do monorepo
 monitoring/              Prometheus, Alertmanager, Grafana (local)
 scripts/                 publicar_mapa, gen-targets, load, trigger-alert
-docs/                    Diagrama de arquitetura (PNG + fonte draw.io)
+docs/                    Diagrama de arquitetura (PNG + fonte draw.io) e ingestao-dados.md
 ```
 
 ---

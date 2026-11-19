@@ -1,6 +1,6 @@
 <mxfile host="Electron">
   <diagram name="Page-1" id="3-bsmeoYEEy9K6NxJazR">
-    <mxGraphModel dx="1856" dy="870" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+    <mxGraphModel dx="2028" dy="760" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -22,8 +22,8 @@
         <mxCell id="X2-6b6VMn2PwN8ITN1_M-12" edge="1" parent="X2-6b6VMn2PwN8ITN1_M-1" source="X2-6b6VMn2PwN8ITN1_M-10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;defaultLabelBackgroundColor=page;" target="X2-6b6VMn2PwN8ITN1_M-3">
           <mxGeometry relative="1" x="0.1511" as="geometry" />
         </mxCell>
-        <mxCell id="X2-6b6VMn2PwN8ITN1_M-13" parent="X2-6b6VMn2PwN8ITN1_M-1" style="sketch=0;points=[[0,0,0],[0.25,0,0],[0.5,0,0],[0.75,0,0],[1,0,0],[0,1,0],[0.25,1,0],[0.5,1,0],[0.75,1,0],[1,1,0],[0,0.25,0],[0,0.5,0],[0,0.75,0],[1,0.25,0],[1,0.5,0],[1,0.75,0]];outlineConnect=0;fontColor=#232F3E;fillColor=#C925D1;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.dynamodb;labelPerimeter=1;" value="boca-lobo-dynamo-mapa" vertex="1">
-          <mxGeometry height="58" width="58" x="290" y="290" as="geometry" />
+        <mxCell id="X2-6b6VMn2PwN8ITN1_M-13" parent="X2-6b6VMn2PwN8ITN1_M-1" style="sketch=0;points=[[0,0,0],[0.25,0,0],[0.5,0,0],[0.75,0,0],[1,0,0],[0,1,0],[0.25,1,0],[0.5,1,0],[0.75,1,0],[1,1,0],[0,0.25,0],[0,0.5,0],[0,0.75,0],[1,0.25,0],[1,0.5,0],[1,0.75,0]];outlineConnect=0;fontColor=#232F3E;fillColor=#C925D1;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.dynamodb;labelPerimeter=1;" value="boca-lobo-dynamo-mapa&lt;div&gt;boca-lobo-dynamo-rpa&lt;/div&gt;" vertex="1">
+          <mxGeometry height="58" width="58" x="240" y="290" as="geometry" />
         </mxCell>
         <mxCell id="X2-6b6VMn2PwN8ITN1_M-15" edge="1" parent="X2-6b6VMn2PwN8ITN1_M-1" source="X2-6b6VMn2PwN8ITN1_M-10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;defaultLabelBackgroundColor=page;" target="X2-6b6VMn2PwN8ITN1_M-13">
           <mxGeometry relative="1" x="0.2903" as="geometry">
@@ -42,13 +42,23 @@
         <mxCell id="X2-6b6VMn2PwN8ITN1_M-23" parent="X2-6b6VMn2PwN8ITN1_M-1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#DD344C;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.permissions;labelPerimeter=1;" value="s3: putObject" vertex="1">
           <mxGeometry height="47.4" width="37.68" x="30" y="170" as="geometry" />
         </mxCell>
+        <mxCell id="X2-6b6VMn2PwN8ITN1_M-22" parent="X2-6b6VMn2PwN8ITN1_M-1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#DD344C;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.long_term_security_credential;labelPerimeter=1;" value="boca-lobo-databricks&lt;div&gt;boca-lobo-rpa&lt;/div&gt;" vertex="1">
+          <mxGeometry height="51.31" width="58" x="-20" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="X2-6b6VMn2PwN8ITN1_M-24" edge="1" parent="X2-6b6VMn2PwN8ITN1_M-1" source="X2-6b6VMn2PwN8ITN1_M-22" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;defaultLabelBackgroundColor=page;" target="X2-6b6VMn2PwN8ITN1_M-23">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
         <mxCell id="X2-6b6VMn2PwN8ITN1_M-6" edge="1" parent="1" source="X2-6b6VMn2PwN8ITN1_M-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;defaultLabelBackgroundColor=page;">
-          <mxGeometry relative="1" as="geometry">
+          <mxGeometry relative="1" x="-0.0051" as="geometry">
+            <Array as="points">
+              <mxPoint x="-60" y="120" />
+              <mxPoint x="-60" y="146.6" />
+            </Array>
             <mxPoint x="-30" y="146.60000000000002" as="targetPoint" />
           </mxGeometry>
         </mxCell>
         <mxCell id="X2-6b6VMn2PwN8ITN1_M-2" parent="1" style="image;aspect=fixed;html=1;align=center;fontSize=12;image=img/lib/azure2/analytics/Azure_Databricks.svg;points=[[0.5,0,0],[0.5,1,0],[0,0.501,0],[0.886,0.5,0],[1,0.263,0],[1,0.742,0],[0,0.742,0],[0,0.26,0]];labelPerimeter=1;" value="data-bricks" vertex="1">
-          <mxGeometry height="62.8" width="58" x="-200" y="117.23" as="geometry" />
+          <mxGeometry height="62.8" width="58" x="-200" y="88.51" as="geometry" />
         </mxCell>
         <mxCell id="X2-6b6VMn2PwN8ITN1_M-7" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;defaultLabelBackgroundColor=page;" target="X2-6b6VMn2PwN8ITN1_M-3">
           <mxGeometry relative="1" as="geometry">
@@ -67,11 +77,16 @@
         <mxCell id="X2-6b6VMn2PwN8ITN1_M-21" edge="1" parent="1" source="X2-6b6VMn2PwN8ITN1_M-20" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;entryPerimeter=0;defaultLabelBackgroundColor=page;" target="X2-6b6VMn2PwN8ITN1_M-16">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="X2-6b6VMn2PwN8ITN1_M-24" edge="1" parent="1" source="X2-6b6VMn2PwN8ITN1_M-22" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;defaultLabelBackgroundColor=page;" target="X2-6b6VMn2PwN8ITN1_M-23">
-          <mxGeometry relative="1" as="geometry" />
+        <mxCell id="X2-6b6VMn2PwN8ITN1_M-27" edge="1" parent="1" source="X2-6b6VMn2PwN8ITN1_M-26" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;defaultLabelBackgroundColor=page;" target="X2-6b6VMn2PwN8ITN1_M-22">
+          <mxGeometry relative="1" x="0.2771" as="geometry">
+            <Array as="points">
+              <mxPoint x="-90" y="230" />
+              <mxPoint x="-90" y="150" />
+            </Array>
+          </mxGeometry>
         </mxCell>
-        <mxCell id="X2-6b6VMn2PwN8ITN1_M-22" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#DD344C;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.long_term_security_credential;labelPerimeter=1;" value="boca-lobo-databricks" vertex="1">
-          <mxGeometry height="51.31" width="58" x="-30" y="120" as="geometry" />
+        <mxCell id="X2-6b6VMn2PwN8ITN1_M-26" parent="1" style="outlineConnect=0;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;shape=mxgraph.aws3.worker;fillColor=#D9A741;gradientColor=none;labelPerimeter=1;" value="RPA python worker" vertex="1">
+          <mxGeometry height="58" width="58" x="-202" y="200" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
